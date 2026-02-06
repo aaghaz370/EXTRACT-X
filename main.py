@@ -171,6 +171,7 @@ async def main():
         print("Sending Startup Notification...")
         users = await get_all_user_ids()
         count = 0
+        from pyrogram.errors import FloodWait
         for uid in users:
             try:
                 await bot.send_message(
@@ -182,6 +183,9 @@ async def main():
                 )
                 count += 1
                 await asyncio.sleep(0.05)
+            except FloodWait as e:
+                print(f"FloodWait: Sleeping {e.value}s")
+                await asyncio.sleep(e.value)
             except Exception:
                 pass
         print(f"Notified {count} users.")
