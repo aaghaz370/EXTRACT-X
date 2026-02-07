@@ -16,12 +16,21 @@ async def check_force_sub(client, message):
     try:
         member = await client.get_chat_member(FORCE_CHANNEL_ID, user_id)
         
-        VALID = [enums.ChatMemberStatus.MEMBER, enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER]
-        if member.status not in VALID:
-             raise UserNotParticipant
-             
-    except Exception:
-        # Not a member or Error Checking
+        # Valid statuses that allow access
+        VALID = [
+            enums.ChatMemberStatus.MEMBER, 
+            enums.ChatMemberStatus.ADMINISTRATOR, 
+            enums.ChatMemberStatus.OWNER
+        ]
+        
+        if member.status in VALID:
+            return True
+        else:
+            # User is banned, left, or kicked
+            raise UserNotParticipant
+              
+    except UserNotParticipant:
+        # User is definitely not a member
         await message.reply_text(
              "⚠️ **Access Verification Required**\n\n"
              "To use **ExtractX**, you must join our official channel.\n"
@@ -33,8 +42,13 @@ async def check_force_sub(client, message):
              ])
         )
         return False
-        
-    return True
+    except Exception as e:
+        # API error or other issue - Allow access to avoid blocking genuine users
+        # Log the error for debugging
+        import logging
+        logging.getLogger(__name__).warning(f"Force sub check error for {user_id}: {e}")
+        # Give benefit of doubt - allow access if check fails
+        return True
 
 # Plan Definitions
 PLANS = {
