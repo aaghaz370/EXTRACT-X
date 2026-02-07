@@ -60,7 +60,7 @@ async def livebatch_command(client, message):
     # Show menu
     await show_livebatch_menu(client, message, user_id, limit)
 
-async def show_livebatch_menu(client, message, user_id, limit):
+async def show_livebatch_menu(client, message, user_id, limit, is_edit=False):
     monitors = await get_live_monitors(user_id)
     active_count = sum(1 for m in monitors if m["active"])
     
@@ -99,7 +99,8 @@ async def show_livebatch_menu(client, message, user_id, limit):
     
     buttons.append([InlineKeyboardButton("❌ Close", callback_data="live_close")])
     
-    if hasattr(message, "edit_text"):
+    # Only edit if it's a callback message (bot's own message)
+    if is_edit:
         await message.edit_text(text, reply_markup=InlineKeyboardMarkup(buttons))
     else:
         await message.reply_text(text, reply_markup=InlineKeyboardMarkup(buttons))
@@ -163,7 +164,7 @@ async def livebatch_callback_handler(client, callback):
             del live_tasks[user_id][source]
         
         await callback.answer("✅ Monitor removed!", show_alert=True)
-        await show_livebatch_menu(client, callback.message, user_id, limit)
+        await show_livebatch_menu(client, callback.message, user_id, limit, is_edit=True)
     
     elif action == "live_toggle":
         monitors = await get_live_monitors(user_id)
@@ -211,10 +212,10 @@ async def livebatch_callback_handler(client, callback):
                     del live_tasks[user_id][source]
                 await callback.answer("⏸ Monitor paused!", show_alert=True)
         
-        await show_livebatch_menu(client, callback.message, user_id, limit)
+        await show_livebatch_menu(client, callback.message, user_id, limit, is_edit=True)
     
     elif action == "live_refresh":
-        await show_livebatch_menu(client, callback.message, user_id, limit)
+        await show_livebatch_menu(client, callback.message, user_id, limit, is_edit=True)
         await callback.answer("♻️ Refreshed!")
     
     elif action == "live_close":
