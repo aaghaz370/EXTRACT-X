@@ -328,13 +328,17 @@ async def start_copy_job(bot, message, user_id, link, limit):
                              mtype = msg.media
                              if mtype == enums.MessageMediaType.PHOTO and filters_set.get("photo"): ok = True
                              elif mtype == enums.MessageMediaType.VIDEO and filters_set.get("video"): ok = True
-                             elif mtype == enums.MessageMediaType.DOCUMENT and filters_set.get("document"): ok = True
+                             elif mtype == enums.MessageMediaType.DOCUMENT:
+                                 if filters_set.get("document"): ok = True
+                                 # Smart Filter: Allow video/image documents
+                                 elif filters_set.get("video") and msg.document.mime_type and str(msg.document.mime_type).startswith("video/"): ok = True
+                                 elif filters_set.get("photo") and msg.document.mime_type and str(msg.document.mime_type).startswith("image/"): ok = True
                              
                              # Enhanced "Media Only" Logic
                              elif filters_set.get("media"): 
-                                 # Allow standard media, exclude Stickers/Service
-                                 if mtype in [enums.MessageMediaType.PHOTO, enums.MessageMediaType.VIDEO, enums.MessageMediaType.DOCUMENT, 
-                                              enums.MessageMediaType.AUDIO, enums.MessageMediaType.VOICE, enums.MessageMediaType.ANIMATION]:
+                                 # Allow minimal media (Audio/Voice/Animation) if specific toggles OFF
+                                 # We remove PHOTO/VIDEO/DOCUMENT here so "Media" doesn't override their specific OFF toggles
+                                 if mtype in [enums.MessageMediaType.AUDIO, enums.MessageMediaType.VOICE, enums.MessageMediaType.ANIMATION]:
                                      ok = True
                         else:
                             if msg.text and filters_set.get("text"): ok = True
@@ -342,20 +346,26 @@ async def start_copy_job(bot, message, user_id, link, limit):
                     if not ok: continue
                     
                     # Caption Logic
-                    final_caption = msg.caption or (msg.text if not msg.media else "") or ""
-                    if final_caption:
-                        for rem in caption_rules.get("removals", []): final_caption = final_caption.replace(rem, "")
-                        for old, new in caption_rules.get("replacements", {}).items(): final_caption = final_caption.replace(old, new)
-                        final_caption = final_caption.strip()
-                        p = caption_rules.get("prefix", "")
-                        s = caption_rules.get("suffix", "")
-                        if p: final_caption = f"{p}\n{final_caption}"
-                        if s: final_caption = f"{final_caption}\n{s}"
-                    else:
-                        p = caption_rules.get("prefix", "")
-                        s = caption_rules.get("suffix", "")
-                        parts = [x for x in [p, s] if x]
-                        if parts: final_caption = "\n".join(parts)
+                    original_cap = msg.caption or (msg.text if not msg.media else "") or ""
+                    
+                    # Apply Removals/Replacements
+                    if original_cap:
+                        for rem in caption_rules.get("removals", []): 
+                            original_cap = original_cap.replace(rem, "")
+                        for old, new in caption_rules.get("replacements", {}).items(): 
+                            original_cap = original_cap.replace(old, new)
+                        original_cap = original_cap.strip()
+                    
+                    # Construct Final
+                    p = caption_rules.get("prefix", "")
+                    s = caption_rules.get("suffix", "")
+                    
+                    parts = []
+                    if p: parts.append(p)
+                    if original_cap: parts.append(original_cap)
+                    if s: parts.append(s)
+                    
+                    final_caption = "\n".join(parts) if parts else None
 
                     # Copy Phase
                     # Copy Phase
@@ -385,7 +395,29 @@ async def start_copy_job(bot, message, user_id, link, limit):
                                         if msg.text:
                                             await userbot.send_message(d_id, final_caption or msg.text)
                                         elif msg.media:
+                                            # Status Update for Large Files
+                                            file_size = 0
+                                            try:
+                                                if msg.document: file_size = msg.document.file_size
+                                                elif msg.video: file_size = msg.video.file_size
+                                                elif msg.audio: file_size = msg.audio.file_size
+                                                
+                                                if file_size > 50 * 1024 * 1024: # 50MB
+                                                    size_mb = f"{file_size / (1024*1024):.1f}"
+                                                    await status_msg.edit_text(
+                                                        f"📥 **Downloading Large File...**\n"
+                                                        f"📦 **Size:** `{size_mb} MB`\n"
+                                                        f"⏳ **Please Wait...**\n\n"
+                                                        f"_(This message will update after download)_"
+                                                    )
+                                            except: pass
+
                                             f_path = await userbot.download_media(msg)
+                                            
+                                            # Update Status for Upload
+                                            if file_size > 50 * 1024 * 1024:
+                                                try: await status_msg.edit_text(f"📤 **Uploading...**\n📦 **Size:** `{size_mb} MB`")
+                                                except: pass
                                             try:
                                                 # Upload based on type
                                                 if msg.photo:
@@ -429,7 +461,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
                                     else:
                                         raise e # Re-raise if not restricted error
 
-                                await asyncio.sleep(0.5) # slightly slower for safety
+                                await asyncio.sleep(1.0) # slightly slower for safety
                                 success = True
                                 break # Done for this destination
                                 
@@ -447,29 +479,34 @@ async def start_copy_job(bot, message, user_id, link, limit):
                     
                     # Live Dashboard Update
                     now = time.time()
-                    if now - last_update_time > 2.5:
+                    if now - last_update_time > 8.0:
                         last_update_time = now
                         
                         # Calculate Percentage
-                        # Logic: (Copied / Workload) * 100
                         percent = 0
                         if total_workload > 0:
                             percent = int((copied / total_workload) * 100)
                         
-                        # Don't show 100% until actually done
                         if percent >= 100: percent = 99
                         
                         bar = get_progress_bar(copied, total_workload, length=12)
                         
-                        await status_msg.edit_text(
-                            f"⚡ **EXTRACT X PROCESSOR** ⚡\n\n"
-                            f"📥 **Processing:** `{copied}` / `{total_workload}`\n"
-                            f"`{bar}` **{percent}%**\n\n"
-                            f"🟢 **Status:** `Active & Copying...`\n"
-                            f"� **Source:** `{chat_title}`\n"
-                            f"📁 **Current Filter:** {filter_str}\n\n"
-                            f"_* Press /cancel to stop immediately._"
-                        )
+                        try:
+                            await status_msg.edit_text(
+                                f"⚡ **EXTRACT X PROCESSOR** ⚡\n\n"
+                                f"📥 **Processing:** `{copied}` / `{total_workload}`\n"
+                                f"`{bar}` **{percent}%**\n\n"
+                                f"🟢 **Status:** `Active & Copying...`\n"
+                                f" **Source:** `{chat_title}`\n"
+                                f"📁 **Current Filter:** {filter_str}\n\n"
+                                f"_* Press /cancel to stop immediately._"
+                            )
+                        except FloodWait as e:
+                            logger.warning(f"UI FloodWait: {e.value}s - Skipping update")
+                            # Don't sleep, just skip UI update to keep extracting
+                            last_update_time = now + e.value # dampen updates for a while
+                        except Exception as e:
+                            logger.error(f"UI Update Fail: {e}")
                     
                     await asyncio.sleep(1.0) # Flood Protection
                 
@@ -482,11 +519,13 @@ async def start_copy_job(bot, message, user_id, link, limit):
             if active_jobs[user_id]["cancel"]: break
             current_id += batch_size
         
-        await userbot.stop()
+        if 'userbot' in locals():
+            await userbot.stop()
         
         # Final Report Card
+        final_text = ""
         if active_jobs[user_id]["cancel"]:
-             await status_msg.edit_text(
+             final_text = (
                 "🛑 **PROCESS CANCELLED**\n"
                 "━━━━━━━━━━━━━━━━━━\n"
                 f"👤 **User:** `{user_id}`\n"
@@ -495,7 +534,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
                 "━━━━━━━━━━━━━━━━━━"
              )
         else:
-             await status_msg.edit_text(
+             final_text = (
                 "✅ **MISSION ACCOMPLISHED**\n"
                 "━━━━━━━━━━━━━━━━━━\n"
                 f"📂 **Source:** `{chat_title}`\n"
@@ -505,9 +544,19 @@ async def start_copy_job(bot, message, user_id, link, limit):
                 "━━━━━━━━━━━━━━━━━━\n"
                 "🤖 *Thank you for using ExtractX*"
              )
+        
+        try:
+            await status_msg.edit_text(final_text)
+        except Exception:
+            # Fallback if edit fails (e.g. FloodWait)
+            await message.reply_text(final_text)
              
     except Exception as e:
-        await status_msg.edit_text(f"❌ **Critical System Error**\n\n`{e}`")
+        err_msg = f"❌ **Critical System Error**\n\n`{e}`"
+        try:
+            await status_msg.edit_text(err_msg)
+        except Exception:
+            await message.reply_text(err_msg)
     
     # Cleanup
     if user_id in active_jobs:
