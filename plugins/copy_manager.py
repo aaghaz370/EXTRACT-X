@@ -406,6 +406,16 @@ async def start_copy_job(bot, message, user_id, link, limit):
                                     # Check for Restricted Content Error
                                     err_str = str(e)
                                     if "CHAT_FORWARDS_RESTRICTED" in err_str or "restricted" in err_str.lower() or "can't copy" in err_str.lower():
+                                        # Notify user IMMEDIATELY
+                                        try:
+                                            await status_msg.edit_text(
+                                                f"🔒 **Restricted Content Detected**\n\n"
+                                                f"Channel blocks forwarding.\n"
+                                                f"Switching to **Manual Download Mode**...\n\n"
+                                                f"_(This will be slower but works)_"
+                                            )
+                                        except: pass
+                                        
                                         # Fallback: Manual Extraction (Download & Upload)
                                         if msg.text:
                                             await userbot.send_message(d_id, final_caption or msg.text)
