@@ -300,6 +300,9 @@ async def start_copy_job(bot, message, user_id, link, limit):
         last_update_time = time.time()
         
         while True:
+            try: userbot.sleep_threshold = 5
+            except: pass
+            
             # 1. Global Checks
             if active_jobs[user_id]["cancel"]: break
             # Stop if we passed the user's limit
@@ -527,6 +530,14 @@ async def start_copy_job(bot, message, user_id, link, limit):
                             logger.error(f"UI Update Fail: {e}")
                     
                     # await asyncio.sleep(1.0) # Removed for Burst Speed
+                
+            except FloodWait as e:
+                logger.warning(f"Batch FloodWait: {e.value}s")
+                try: await status_msg.edit_text(f"⏳ **Rate Limited**\n\nTelegram says wait `{e.value}s`.\nI'll wait and retry this batch.")
+                except: pass
+                await asyncio.sleep(e.value + 2)
+                fail_count = 0
+                continue 
                 
             except Exception as e:
                 logger.error(f"Batch Error: {e}")
