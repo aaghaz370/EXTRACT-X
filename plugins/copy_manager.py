@@ -239,6 +239,16 @@ async def start_copy_job(bot, message, user_id, link, limit):
                 await userbot.stop()
                 if user_id in active_jobs: del active_jobs[user_id]
                 return
+            
+            if start_msg_id > real_last_msg_id:
+                await status_msg.edit_text(
+                    f"⚠️ **Range Error**\n\n"
+                    f"Start ID (`{start_msg_id}`) is higher than Last ID (`{real_last_msg_id}`).\n"
+                    f"Maybe the bot joined a different channel or history is restricted?"
+                )
+                await userbot.stop()
+                if user_id in active_jobs: del active_jobs[user_id]
+                return
                      
         except Exception as e:
             await status_msg.edit_text(f"❌ **Link Error**\n\nFailed to parse link: `{e}`")
@@ -260,6 +270,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
             target_stop_id = min(calc_stop, real_last_msg_id)
             
         total_workload = max(1, target_stop_id - start_msg_id)
+        logger.info(f"Workload Debug: Target={target_stop_id}, Start={start_msg_id}, Limit={limit}, Result={total_workload}")
         if limit and limit < total_workload: total_workload = limit
         burst_count = 0
         
@@ -297,7 +308,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
             if current_id > target_stop_id or current_id > real_last_msg_id: break
             
             # Batch Fetch
-            batch_size = 20
+            batch_size = 50
             end_id = current_id + batch_size
             ids_to_fetch = list(range(current_id, end_id))
             
