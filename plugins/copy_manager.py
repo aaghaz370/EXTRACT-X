@@ -261,6 +261,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
             
         total_workload = max(1, target_stop_id - start_msg_id)
         if limit and limit < total_workload: total_workload = limit
+        burst_count = 0
         
         # Prepare Active Filters Text
         active_f = []
@@ -461,7 +462,13 @@ async def start_copy_job(bot, message, user_id, link, limit):
                                     else:
                                         raise e # Re-raise if not restricted error
 
-                                await asyncio.sleep(1.0) # slightly slower for safety
+                                burst_count += 1
+                                if burst_count >= 20: 
+                                    burst_count = 0
+                                    await asyncio.sleep(10) # Cooling Period
+                                else:
+                                    await asyncio.sleep(0.1) # Fast Burst
+
                                 success = True
                                 break # Done for this destination
                                 
