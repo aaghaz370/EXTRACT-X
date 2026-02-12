@@ -515,7 +515,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
                         except Exception as e:
                             logger.error(f"UI Update Fail: {e}")
                     
-                    await asyncio.sleep(1.0) # Flood Protection
+                    # await asyncio.sleep(1.0) # Removed for Burst Speed
                 
             except Exception as e:
                 logger.error(f"Batch Error: {e}")
@@ -525,6 +525,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
             
             if active_jobs[user_id]["cancel"]: break
             current_id += batch_size
+            await asyncio.sleep(2.0) # Safety between GetMessages
         
         if 'userbot' in locals():
             await userbot.stop()
