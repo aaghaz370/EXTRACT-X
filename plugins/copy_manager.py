@@ -405,7 +405,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
                                 except Exception as e:
                                     # Check for Restricted Content Error
                                     err_str = str(e)
-                                    if "CHAT_FORWARDS_RESTRICTED" in err_str or "restricted" in err_str.lower():
+                                    if "CHAT_FORWARDS_RESTRICTED" in err_str or "restricted" in err_str.lower() or "can't copy" in err_str.lower():
                                         # Fallback: Manual Extraction (Download & Upload)
                                         if msg.text:
                                             await userbot.send_message(d_id, final_caption or msg.text)
