@@ -85,15 +85,20 @@ async def handle_batch_input(client, message):
     text = message.text.strip()
     
     if step == "LINK":
-        if "t.me/c/" not in text:
-            await message.reply_text("❌ Invalid Private Channel Link. Try again.")
+        if "t.me/" not in text:
+            await message.reply_text("❌ Invalid Telegram URL. Try again.")
             return True
         
         # Parse channel ID from link
         try:
-            parts = text.split("/")
-            channel_id_str = parts[-2]
-            source_id = int(f"-100{channel_id_str}")
+            raw_link = text.rstrip("/").split("?")[0]
+            parts = raw_link.split("/")
+            
+            if "c" in parts:
+                channel_id_str = parts[-2]
+                source_id = int(f"-100{channel_id_str}")
+            else:
+                source_id = parts[-2]
             
             # Check if protected
             if await is_protected_channel(source_id):
