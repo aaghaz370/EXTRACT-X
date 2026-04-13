@@ -200,8 +200,11 @@ async def start_copy_job(bot, message, user_id, link, limit):
 
         # Parse Link
         try:
-            parts = link.rstrip("/").split("/")
+            # Clean link: specifically strip off query parameters (like ?single) which crash int conversion
+            raw_link = link.rstrip("/").split("?")[0]
+            parts = raw_link.split("/")
             start_msg_id = int(parts[-1])
+            
             if "c" in parts:
                 channel_id_str = parts[-2]
                 source_id = int(f"-100{channel_id_str}")
@@ -210,23 +213,28 @@ async def start_copy_job(bot, message, user_id, link, limit):
             
             # 1. Verify Access & Get Chat Info
             real_chat_id = source_id
-            chat_title = "Private Channel"
+            chat_title = "Channel"
             try:
                 chat = await userbot.get_chat(source_id)
                 real_chat_id = chat.id
                 chat_title = chat.title or "Unknown Channel"
-            except:
-                 # Fallback: Search Dialogs
+            except Exception as e:
+                 # Fallback: Search Dialogs (useful if Telegram restricts get_chat on some peers)
+                 logger.error(f"get_chat failed for {source_id}: {e}")
                  found_dialog = False
                  async for d in userbot.get_dialogs():
                      if active_jobs[user_id]["cancel"]: break
-                     if d.chat.id == source_id:
+                     
+                     match_id = d.chat.id == source_id
+                     match_username = isinstance(source_id, str) and d.chat.username and d.chat.username.lower() == source_id.lower()
+                     
+                     if match_id or match_username:
                          real_chat_id = d.chat.id
-                         chat_title = d.chat.title or "Private Channel"
+                         chat_title = d.chat.title or "Channel"
                          found_dialog = True
                          break
                  if not found_dialog:
-                     await status_msg.edit_text("❌ **Source Not Found**\n\nThe bot cannot access this channel. Ensure you have joined it.")
+                     await status_msg.edit_text("❌ **Source Not Found**\n\nThe bot cannot access this channel. Ensure the link is correct and you have joined the channel if it is private.")
                      await userbot.stop()
                      if user_id in active_jobs: del active_jobs[user_id]
                      return
