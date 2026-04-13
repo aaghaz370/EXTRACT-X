@@ -211,7 +211,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
             await record_task_use(user_id)
             
             if is_public:
-                userbot = client
+                userbot = bot
             else:
                 if not session:
                     await status_msg.edit_text("🚫 **Login Error**\n\nYou need to login to extract from private channels.")
@@ -250,7 +250,9 @@ async def start_copy_job(bot, message, user_id, link, limit):
                          break
                  if not found_dialog:
                      await status_msg.edit_text("❌ **Source Not Found**\n\nThe bot cannot access this channel. Ensure the link is correct and you have joined the channel if it is private.")
-                     await userbot.stop()
+                     if 'userbot' in locals() and userbot != bot:
+                         try: await userbot.stop()
+                         except: pass
                      if user_id in active_jobs: del active_jobs[user_id]
                      return
             
@@ -262,7 +264,9 @@ async def start_copy_job(bot, message, user_id, link, limit):
             
             if real_last_msg_id == 0:
                 await status_msg.edit_text("⚠️ **Channel Empty**\n\nNo messages found in the source channel.")
-                await userbot.stop()
+                if 'userbot' in locals() and userbot != bot:
+                    try: await userbot.stop()
+                    except: pass
                 if user_id in active_jobs: del active_jobs[user_id]
                 return
             
@@ -272,13 +276,18 @@ async def start_copy_job(bot, message, user_id, link, limit):
                     f"Start ID (`{start_msg_id}`) is higher than Last ID (`{real_last_msg_id}`).\n"
                     f"Maybe the bot joined a different channel or history is restricted?"
                 )
-                await userbot.stop()
+                if 'userbot' in locals() and userbot != bot:
+                    try: await userbot.stop()
+                    except: pass
                 if user_id in active_jobs: del active_jobs[user_id]
                 return
                      
         except Exception as e:
             await status_msg.edit_text(f"❌ **Link Error**\n\nFailed to parse link: `{e}`")
-            await userbot.stop()
+            worker_client = locals().get('userbot')
+            if worker_client and worker_client != bot:
+                try: await worker_client.stop()
+                except: pass
             if user_id in active_jobs: del active_jobs[user_id]
             return
 
@@ -603,8 +612,9 @@ async def start_copy_job(bot, message, user_id, link, limit):
             current_id += batch_size
             await asyncio.sleep(2.0) # Safety between GetMessages
         
-        if 'userbot' in locals() and userbot != client:
-            try: await userbot.stop()
+        worker_client = locals().get('userbot')
+        if worker_client and worker_client != bot:
+            try: await worker_client.stop()
             except: pass
         
         # Final Report Card
