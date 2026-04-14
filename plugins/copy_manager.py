@@ -219,6 +219,10 @@ async def start_copy_job(bot, message, user_id, link, limit):
                 userbot = Client(f"worker_{user_id}", api_id=API_ID, api_hash=API_HASH, session_string=session, in_memory=True)
                 try:
                     await userbot.start()
+                    # WARM UP Pyrogram's in-memory database to prevent PeerIdInvalid for destination channels later
+                    try:
+                        async for _ in userbot.get_dialogs(limit=200): pass
+                    except: pass
                 except Exception as e:
                     await status_msg.edit_text(f"🚫 **Login Error**\n\nCould not connect to user account.\nReason: `{e}`")
                     if user_id in active_jobs: del active_jobs[user_id]
