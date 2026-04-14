@@ -211,13 +211,11 @@ async def start_copy_job(bot, message, user_id, link, limit):
             await record_task_use(user_id)
             
             if is_public:
-                userbot = bot
-            else:
-                if not session:
-                    await status_msg.edit_text("🚫 **Login Error**\n\nYou need to login to extract from private channels.")
-                    if user_id in active_jobs: del active_jobs[user_id]
-                    return
-                    
+                # Guarantee resolution by prefixing @
+                source_id = f"@{parts[-2]}" if not parts[-2].startswith("@") else parts[-2]
+            
+            # Prefer Userbot if session exists (to bypass destination channel permission limits)
+            if session:
                 userbot = Client(f"worker_{user_id}", api_id=API_ID, api_hash=API_HASH, session_string=session, in_memory=True)
                 try:
                     await userbot.start()
@@ -225,6 +223,13 @@ async def start_copy_job(bot, message, user_id, link, limit):
                     await status_msg.edit_text(f"🚫 **Login Error**\n\nCould not connect to user account.\nReason: `{e}`")
                     if user_id in active_jobs: del active_jobs[user_id]
                     return
+            else:
+                if not is_public:
+                    await status_msg.edit_text("🚫 **Login Error**\n\nYou need to login to extract from private channels.")
+                    if user_id in active_jobs: del active_jobs[user_id]
+                    return
+                # Use Main Bot if not logged in (and channel is public)
+                userbot = bot
             
             # 1. Verify Access & Get Chat Info
             real_chat_id = source_id
@@ -241,7 +246,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
                      if active_jobs[user_id]["cancel"]: break
                      
                      match_id = d.chat.id == source_id
-                     match_username = isinstance(source_id, str) and d.chat.username and d.chat.username.lower() == source_id.lower()
+                     match_username = isinstance(source_id, str) and d.chat.username and d.chat.username.lower() == source_id.lstrip("@").lower()
                      
                      if match_id or match_username:
                          real_chat_id = d.chat.id
