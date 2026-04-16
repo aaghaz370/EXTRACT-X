@@ -1,7 +1,7 @@
 from pyrogram import Client, filters, enums
 from pyrogram.errors import UserNotParticipant
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from database import get_subscription, set_subscription, update_user_task
+from database import get_subscription, set_subscription, update_user_task, send_log_api
 from config import OWNER_ID, FORCE_CHANNEL_ID
 import time
 import datetime
@@ -168,8 +168,7 @@ async def add_premium(client, message):
         
         # Log Admin Action
         try:
-            await client.send_message(
-                -1003748199616,
+            await send_log_api(
                 f"🎁 **PREMIUM GRANTED**\n\n👤 **User ID:** `{target_id}`\n💎 **Plan:** `{PLANS[plan_id]['name']}`\n⏳ **Duration:** `{duration} days`\n👮‍♂️ **By Admin:** `{message.from_user.id}`"
             )
         except: pass
@@ -197,8 +196,7 @@ async def remove_premium(client, message):
         
         # Log Admin Action
         try:
-            await client.send_message(
-                -1003748199616,
+            await send_log_api(
                 f"🔻 **PREMIUM REVOKED**\n\n👤 **User ID:** `{target_id}`\n👮‍♂️ **By Admin:** `{message.from_user.id}`"
             )
         except: pass
@@ -288,5 +286,5 @@ async def show_plan(client, message):
             f"💎 **Current Plan:** `{plan_info['name']}`\n"
             f"📊 **Tasks Used:** `{tasks_done}` / `{limit_text}`"
         )
-        await client.send_message(-1003748199616, log_text)
+        await send_log_api(log_text)
     except: pass

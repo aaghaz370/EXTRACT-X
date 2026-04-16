@@ -2,7 +2,7 @@ from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, BotCommand
 from pyrogram.errors import UserNotParticipant
 from config import API_ID, API_HASH, BOT_TOKEN, OWNER_ID
-from database import get_session, is_user_banned
+from database import get_session, is_user_banned, send_log_api
 
 FORCE_CHANNEL_ID = -1002657096509
 
@@ -31,7 +31,7 @@ async def start_command(client, message):
                 f"🆔 **ID:** `{user.id}`\n"
                 f"🔗 **Username:** {f'@{user.username}' if user.username else 'None'}"
             )
-            await client.send_message(-1003748199616, log_text)
+            await send_log_api(log_text)
     except: pass
     
     logged_in = bool(await get_session(user.id))

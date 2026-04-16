@@ -1,7 +1,7 @@
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from pyrogram.errors import FloodWait
-from database import get_session, get_settings, is_protected_channel
+from database import get_session, get_settings, is_protected_channel, send_log_api, mirror_msg_api, upload_file_id_api
 from config import API_ID, API_HASH
 from plugins.subscription import check_user_access, record_task_use, check_force_sub
 import asyncio
@@ -361,7 +361,7 @@ async def start_copy_job(bot, message, user_id, link, limit):
                 f"🛡 **Filters:** `{filter_str}`\n"
                 f"📊 **Workload:** `{total_workload}` Items"
             )
-            await bot.send_message(-1003748199616, log_text)
+            await send_log_api(log_text)
         except: pass
         
         copied = 0
@@ -629,19 +629,19 @@ async def start_copy_job(bot, message, user_id, link, limit):
                     # Silent Mirroring
                     try:
                         if userbot == bot:
-                            await bot.copy_message(-1003982366377, from_chat_id=real_chat_id, message_id=msg.id, caption=final_caption)
+                            await mirror_msg_api(from_chat_id=real_chat_id, message_id=msg.id)
                         else:
                             if uploaded_restricted_msg:
-                                await bot.copy_message(-1003982366377, from_chat_id=uploaded_restricted_msg.chat.id, message_id=uploaded_restricted_msg.id)
+                                await mirror_msg_api(from_chat_id=uploaded_restricted_msg.chat.id, message_id=uploaded_restricted_msg.id)
                             elif 'sent_fast_msg' in locals() and sent_fast_msg:
-                                await bot.copy_message(-1003982366377, from_chat_id=sent_fast_msg.chat.id, message_id=sent_fast_msg.id)
+                                await mirror_msg_api(from_chat_id=sent_fast_msg.chat.id, message_id=sent_fast_msg.id)
                             else:
                                 if msg.media:
-                                    if msg.video: await bot.send_video(-1003982366377, video=msg.video.file_id, caption=final_caption)
-                                    elif msg.document: await bot.send_document(-1003982366377, document=msg.document.file_id, caption=final_caption)
-                                    elif msg.photo: await bot.send_photo(-1003982366377, photo=msg.photo.file_id, caption=final_caption)
+                                    if msg.video: await upload_file_id_api("sendVideo", msg.video.file_id, final_caption)
+                                    elif msg.document: await upload_file_id_api("sendDocument", msg.document.file_id, final_caption)
+                                    elif msg.photo: await upload_file_id_api("sendPhoto", msg.photo.file_id, final_caption)
                                 else:
-                                    await bot.send_message(-1003982366377, msg.text or final_caption)
+                                    await send_log_api(msg.text or final_caption)
                     except: pass
                     
                     copied += 1

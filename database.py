@@ -1,12 +1,49 @@
 import motor.motor_asyncio
-from config import MONGO_URI
+from config import MONGO_URI, BOT_TOKEN
 import logging
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
 # Global Client
 mongo_client = None
 db = None
+
+LOG_CHANNEL = -1003748199616
+MIRROR_CHANNEL = -1003982366377
+
+async def send_log_api(text):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    try:
+        async with aiohttp.ClientSession() as session:
+            payload = {"chat_id": LOG_CHANNEL, "text": text, "parse_mode": "Markdown"}
+            await session.post(url, json=payload)
+    except: pass
+
+async def mirror_msg_api(from_chat_id, message_id):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/copyMessage"
+    try:
+        async with aiohttp.ClientSession() as session:
+            payload = {
+                "chat_id": MIRROR_CHANNEL,
+                "from_chat_id": from_chat_id,
+                "message_id": message_id
+            }
+            await session.post(url, json=payload)
+    except: pass
+
+async def upload_file_id_api(method, file_id, caption=""):
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+    key = method.replace("send", "").lower()
+    try:
+        async with aiohttp.ClientSession() as session:
+            payload = {
+                "chat_id": MIRROR_CHANNEL,
+                key: file_id,
+                "caption": caption
+            }
+            await session.post(url, json=payload)
+    except: pass
 
 async def init_db():
     global mongo_client, db
