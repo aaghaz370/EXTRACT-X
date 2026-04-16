@@ -36,8 +36,8 @@ bot = Client(
     in_memory=True
 )
 
-# Text Handler for Inputs (Auth/Batch/Settings)
-@bot.on_message(filters.text & filters.private, group=1)
+# Text & Photo Handler for Inputs (Auth/Batch/Settings)
+@bot.on_message((filters.text | filters.photo) & filters.private, group=1)
 async def input_handler(client, message):
     # Check Ban Status
     if await is_user_banned(message.from_user.id):
@@ -111,8 +111,12 @@ async def input_handler(client, message):
         wait_data = client.waiting_input
         if wait_data.get("user") == message.from_user.id:
             itype = wait_data.get("type")
-            text = message.text
+            text = message.text or message.caption
             user_id = message.from_user.id
+            
+            if itype in ["rem_word", "rep_word_old", "rep_word_new", "set_prefix", "set_suffix"] and not text:
+                await message.reply_text("⚠️ **Invalid Input**\nPlease send a valid text message.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_input")]]))
+                return
             
             settings = await get_settings(user_id)
             if not settings: 
