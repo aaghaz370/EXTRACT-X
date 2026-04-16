@@ -232,8 +232,17 @@ async def start_copy_job(bot, message, user_id, link, limit):
                     await status_msg.edit_text("🚫 **Login Error**\n\nYou need to login to extract from private channels.")
                     if user_id in active_jobs: del active_jobs[user_id]
                     return
-                # Use Main Bot if not logged in (and channel is public)
+            # Use Main Bot if not logged in (and channel is public)
                 userbot = bot
+            
+            # Pre-download custom thumbnail (so it's extremely fast for all messages)
+            custom_thumb_path = None
+            custom_thumb_id = settings.get("custom_thumbnail")
+            if custom_thumb_id:
+                try:
+                    custom_thumb_path = await bot.download_media(custom_thumb_id)
+                except Exception as e:
+                    logger.warning(f"Thumbnail Pre-load Error: {e}")
             
             # 1. Verify Access & Get Chat Info
             real_chat_id = source_id
@@ -484,16 +493,22 @@ async def start_copy_job(bot, message, user_id, link, limit):
 
                                 # Try fast copy first
                                 try:
-                                    await userbot.copy_message(
-                                        chat_id=d_id, 
-                                        from_chat_id=real_chat_id, 
-                                        message_id=msg.id, 
-                                        caption=final_caption
-                                    )
+                                    if custom_thumb_path and msg.media:
+                                        if msg.video:
+                                            await userbot.send_video(d_id, video=msg.video.file_id, caption=final_caption, thumb=custom_thumb_path)
+                                        elif msg.document:
+                                            await userbot.send_document(d_id, document=msg.document.file_id, caption=final_caption, thumb=custom_thumb_path)
+                                        elif msg.audio:
+                                            await userbot.send_audio(d_id, audio=msg.audio.file_id, caption=final_caption, thumb=custom_thumb_path)
+                                        else:
+                                            await userbot.copy_message(chat_id=d_id, from_chat_id=real_chat_id, message_id=msg.id, caption=final_caption)
+                                    else:
+                                        await userbot.copy_message(chat_id=d_id, from_chat_id=real_chat_id, message_id=msg.id, caption=final_caption)
+                                        
                                 except Exception as e:
                                     # Check for Restricted Content Error
                                     err_str = str(e)
-                                    if "CHAT_FORWARDS_RESTRICTED" in err_str or "restricted" in err_str.lower() or "can't copy" in err_str.lower():
+                                    if "CHAT_FORWARDS_RESTRICTED" in err_str or "restricted" in err_str.lower() or "can't copy" in err_str.lower() or "file_reference" in err_str.lower() or "media_empty" in err_str.lower() or "file_id" in err_str.lower():
                                         # Notify user IMMEDIATELY
                                         try:
                                             await status_msg.edit_text(
@@ -536,8 +551,8 @@ async def start_copy_job(bot, message, user_id, link, limit):
                                                 if msg.photo:
                                                     sent_msg = await userbot.send_photo(d_id, f_path, caption=final_caption, progress=get_progress_func("Uploading to Target"))
                                                 elif msg.video:
-                                                    thumb_path = None
-                                                    if getattr(msg.video, "thumbs", None):
+                                                    thumb_path = custom_thumb_path
+                                                    if not thumb_path and getattr(msg.video, "thumbs", None):
                                                         thumb_path = await userbot.download_media(msg.video.thumbs[0].file_id)
                                                     
                                                     try:
@@ -552,10 +567,10 @@ async def start_copy_job(bot, message, user_id, link, limit):
                                                             progress=get_progress_func("Uploading to Target")
                                                         )
                                                     finally:
-                                                        if thumb_path and os.path.exists(thumb_path):
+                                                        if thumb_path and thumb_path != custom_thumb_path and os.path.exists(thumb_path):
                                                             os.remove(thumb_path)
                                                 elif msg.document:
-                                                    sent_msg = await userbot.send_document(d_id, f_path, caption=final_caption, force_document=True, progress=get_progress_func("Uploading to Target"))
+                                                    sent_msg = await userbot.send_document(d_id, f_path, caption=final_caption, force_document=True, thumb=custom_thumb_path, progress=get_progress_func("Uploading to Target"))
                                                 elif msg.audio:
                                                     sent_msg = await userbot.send_audio(d_id, f_path, caption=final_caption, duration=msg.audio.duration, performer=msg.audio.performer, title=msg.audio.title, progress=get_progress_func("Uploading to Target"))
                                                 elif msg.voice:
@@ -693,5 +708,9 @@ async def start_copy_job(bot, message, user_id, link, limit):
             await message.reply_text(err_msg)
     
     # Cleanup
+    if 'custom_thumb_path' in locals() and custom_thumb_path and os.path.exists(custom_thumb_path):
+        try: os.remove(custom_thumb_path)
+        except: pass
+        
     if user_id in active_jobs:
         del active_jobs[user_id]

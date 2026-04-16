@@ -1,5 +1,5 @@
 from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery, InputMediaPhoto
 from database import get_settings, update_settings
 
 from plugins.subscription import check_force_sub
@@ -10,15 +10,24 @@ async def settings_command(client, message):
         return
     await show_settings_panel(message.from_user.id, message)
 
-async def edit_or_reply(message, text, markup):
+async def edit_or_reply(message, text, markup, media_path=None):
     try:
-        if message.photo:
-            await message.edit_caption(text, reply_markup=markup)
+        if media_path:
+            if message.photo:
+                await message.edit_media(InputMediaPhoto(media_path, caption=text), reply_markup=markup)
+            else:
+                await message.delete()
+                await message.reply_photo(media_path, caption=text, reply_markup=markup)
         else:
-            await message.edit_text(text, reply_markup=markup)
+            if message.photo:
+                await message.edit_caption(text, reply_markup=markup)
+            else:
+                await message.edit_text(text, reply_markup=markup)
     except Exception:
         # Fallback if type mismatch or other issue
-        await message.edit_text(text, reply_markup=markup)
+        try:
+            await message.edit_text(text, reply_markup=markup)
+        except: pass
 
 async def show_settings_panel(user_id, message_obj, is_edit=False):
     settings = await get_settings(user_id)
@@ -49,6 +58,9 @@ async def show_settings_panel(user_id, message_obj, is_edit=False):
              InlineKeyboardButton("📝 Caption Editor", callback_data="cap_panel")
         ],
         [
+             InlineKeyboardButton("🖼 Thumbnail Editor", callback_data="thumb_panel")
+        ],
+        [
              InlineKeyboardButton("--- Content Filters ---", callback_data="ignore")
         ],
         [
@@ -68,7 +80,7 @@ async def show_settings_panel(user_id, message_obj, is_edit=False):
     markup = InlineKeyboardMarkup(kb)
     
     if is_edit:
-        await edit_or_reply(message_obj, text, markup)
+        await edit_or_reply(message_obj, text, markup, media_path="logo/setting.jpg")
     else:
         # Initial Command - Send Photo
         try:
@@ -294,7 +306,7 @@ async def back_settings(client, callback: CallbackQuery):
     # Determine if we go to main settings or somewhere else
     await show_settings_panel(callback.from_user.id, callback.message, is_edit=True)
 
-@Client.on_callback_query(filters.regex("^(add_channel|del_channel_menu|del_channel_idx_|cancel_input)"))
+@Client.on_callback_query(filters.regex("^(add_channel|del_channel_menu|del_channel_idx_|cancel_input|thumb_panel|thumb_set|thumb_rem)"))
 async def channel_actions_handler(client, callback: CallbackQuery):
     action = callback.data
     user_id = callback.from_user.id
@@ -312,6 +324,42 @@ async def channel_actions_handler(client, callback: CallbackQuery):
             await callback.message.edit_text("🚫 **Action Cancelled.**")
         else:
             await callback.answer("Nothing to cancel.", show_alert=True)
+
+    elif action == "thumb_panel":
+        settings = await get_settings(user_id) or {}
+        thumb_id = settings.get("custom_thumbnail")
+        text = (
+            "🖼 **Thumbnail Editor**\n\n"
+            "Upload a custom thumbnail here. This image will automatically be attached to all extracted videos and documents.\n\n"
+        )
+        if thumb_id:
+            text += "✅ **Status:** Custom Thumbnail Active!"
+        else:
+            text += "❌ **Status:** No Custom Thumbnail (Default)."
+            
+        kb = [[InlineKeyboardButton("➕ Set Thumbnail", callback_data="thumb_set")]]
+        if thumb_id:
+            kb.append([InlineKeyboardButton("🗑 Remove Thumbnail", callback_data="thumb_rem")])
+            
+        kb.append([InlineKeyboardButton("🔙 Back to Main", callback_data="back_settings")])
+        await edit_or_reply(callback.message, text, InlineKeyboardMarkup(kb), media_path=thumb_id or "logo/setting.jpg")
+
+    elif action == "thumb_set":
+        client.waiting_input = {"user": user_id, "type": "set_thumb"}
+        await callback.message.reply_text(
+            "🖼 **Upload Thumbnail**\n\nPlease send me an Image (Photo) to set as your custom thumbnail.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_input")]])
+        )
+        await callback.answer()
+
+    elif action == "thumb_rem":
+        settings = await get_settings(user_id) or {}
+        settings["custom_thumbnail"] = None
+        await update_settings(user_id, custom_thumbnail=None)
+        await callback.answer("🗑 Custom Thumbnail Removed!", show_alert=True)
+        callback.data = "thumb_panel"
+        await channel_actions_handler(client, callback)
+
             
     elif action == "add_channel":
         client.waiting_channel_user = user_id

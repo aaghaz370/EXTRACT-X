@@ -79,17 +79,16 @@ async def get_settings(user_id):
         return {
             "dest_channels": settings.get("dest_channels", []),
             "filters": settings.get("filters", {"all": True}),
-            "caption_rules": settings.get("caption_rules", {})
+            "caption_rules": settings.get("caption_rules", {}),
+            "custom_thumbnail": settings.get("custom_thumbnail", None)
         }
     return None
 
-async def update_settings(user_id, dest_channels=None, filters=None, caption_rules=None):
+async def update_settings(user_id, **kwargs):
     database = await get_db()
-    update_data = {}
     
-    if dest_channels is not None: update_data["dest_channels"] = dest_channels
-    if filters is not None: update_data["filters"] = filters
-    if caption_rules is not None: update_data["caption_rules"] = caption_rules
+    allowed_keys = ["dest_channels", "filters", "caption_rules", "custom_thumbnail"]
+    update_data = {k: v for k, v in kwargs.items() if k in allowed_keys}
     
     if not update_data: return
 

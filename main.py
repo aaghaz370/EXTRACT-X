@@ -7,7 +7,7 @@ except RuntimeError:
     asyncio.set_event_loop(asyncio.new_event_loop())
 
 from pyrogram import Client, filters, idle
-from pyrogram.types import BotCommand
+from pyrogram.types import BotCommand, InlineKeyboardMarkup, InlineKeyboardButton
 from config import API_ID, API_HASH, BOT_TOKEN
 import os
 from aiohttp import web
@@ -156,6 +156,16 @@ async def input_handler(client, message):
                 rules["suffix"] = text
                 await update_settings(user_id, caption_rules=rules)
                 await message.reply_text(f"✅ Suffix set to: `{text}`")
+                del client.waiting_input
+                await show_settings_panel(user_id, message, is_edit=False)
+                
+            elif itype == "set_thumb":
+                if not message.photo:
+                    await message.reply_text("⚠️ **Invalid Input**\nPlease send a valid Image/Photo.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="cancel_input")]]))
+                    return
+                # Save the file_id of the photo
+                await update_settings(user_id, custom_thumbnail=message.photo.file_id)
+                await message.reply_text("✅ **Custom Thumbnail Selected!**")
                 del client.waiting_input
                 await show_settings_panel(user_id, message, is_edit=False)
             
