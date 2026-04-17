@@ -12,7 +12,7 @@ from database import (
     get_session, get_settings, is_protected_channel,
     save_live_monitor, delete_live_monitor, get_live_monitors,
     toggle_live_monitor, get_all_live_monitors,
-    increment_live_stats, update_live_monitor_meta
+    increment_live_stats, update_live_monitor_meta, increment_channel_stat
 )
 from plugins.subscription import check_force_sub, get_resolved_plan, PLANS
 from config import API_ID, API_HASH, OWNER_ID
@@ -484,53 +484,93 @@ async def handle_livebatch_input(client, message):
         state["source"] = source_id
         state["source_title"] = source_title
         state["step"] = "DEST"
+
         await message.reply_text(
             f"✅ **Source Set!**\n\n"
             f"📡 **Channel:** `{source_title}`\n"
             f"🆔 **ID:** `{source_id}`\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "**Step 2/2 — Destination Channel:**\n\n"
-            "Send destination ID or username:\n"
-            "• `-100123456789`\n• `@mychannel`\n\n"
-            "⚠️ Bot must be **Admin** in destination!"
+            "**Step 2/2 — Pick Destination(s):**\n\n"
+            "Select which channel(s) to forward into.\n"
+            "You can choose **multiple** channels at once!",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("📡 Pick Destination Channels", callback_data="live_open_dest_picker")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="live_cancel_setup")],
+            ])
         )
         return True
 
     elif step == "DEST":
-        try:
-            dest_id, _ = parse_channel_input(text)
-        except ValueError:
-            await message.reply_text("❌ Invalid destination. Send ID or @username.")
-            return True
-
-        source_id = state["source"]
-        source_title = state.get("source_title", str(source_id))
-
-        await save_live_monitor(user_id, source_id, dest_id)
-        await update_live_monitor_meta(user_id, source_id, source_title=source_title)
-        await start_monitor_task(client, user_id, source_id, dest_id)
-        del livebatch_states[user_id]
-
+        # DEST is now handled via channel picker — ignore stray text
         await message.reply_text(
-            "╔══════════════════════╗\n"
-            "║  📡  MONITOR ACTIVE!  ║\n"
-            "╚══════════════════════╝\n\n"
-            f"📡 **Source:** `{source_title}`\n"
-            f"📤 **Destination:** `{dest_id}`\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⚡ **Features active:**\n"
-            "• Every new post auto-forwarded instantly\n"
-            "• Restricted? DL+Upload (max 2 GB per file)\n"
-            "• Files queued — nothing ever missed!\n"
-            "• Your filters & captions from /settings apply\n\n"
-            "Use /livebatch → 📊 to view real-time stats!",
+            "⚠️ Please select destination channel(s) using the button below.",
             reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("📡 Manage Monitors", callback_data="live_refresh")]
+                [InlineKeyboardButton("📡 Pick Destination", callback_data="live_open_dest_picker")]
             ])
         )
         return True
 
     return False
+
+# ── Open destination picker for livebatch ──────────────────────────────
+@Client.on_callback_query(filters.regex("^live_open_dest_picker$"))
+async def live_open_dest_picker(client, callback):
+    user_id = callback.from_user.id
+    state = livebatch_states.get(user_id)
+    if not state or state.get("step") != "DEST":
+        await callback.answer("Session expired. Run /livebatch again.", show_alert=True)
+        return
+
+    from database import get_settings as _get_settings
+    from plugins.channel_picker import open_channel_picker
+
+    settings = await _get_settings(user_id)
+    default_live = (settings or {}).get("default_live_channels", [])
+
+    async def on_live_dest_confirmed(cl, cb, uid, selected_channels, extra):
+        s = livebatch_states.get(uid, {})
+        source_id    = s.get("source")
+        source_title = s.get("source_title", str(source_id))
+        if not source_id:
+            try: await cb.message.edit_text("❌ Session expired. Run /livebatch again.")
+            except: pass
+            return
+
+        # Save one monitor per selected destination
+        for dest in selected_channels:
+            await save_live_monitor(uid, source_id, dest)
+            await update_live_monitor_meta(uid, source_id, source_title=source_title)
+            await start_monitor_task(cl, uid, source_id, dest)
+
+        livebatch_states.pop(uid, None)
+
+        dest_list = "\n".join(f"  • `{d}`" for d in selected_channels)
+        try:
+            await cb.message.edit_text(
+                "╔══════════════════════╗\n"
+                "║  📡  MONITORS ACTIVE!  ║\n"
+                "╚══════════════════════╝\n\n"
+                f"📡 **Source:** `{source_title}`\n"
+                f"📤 **Destinations ({len(selected_channels)}):**\n{dest_list}\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━\n"
+                "⚡ Every new post auto-forwarded to ALL selected channels!\n"
+                "• Restricted? DL+Upload (max 2 GB)\n"
+                "• Queue system — nothing ever missed!\n\n"
+                "Use /livebatch → 📊 for real-time stats!",
+                reply_markup=InlineKeyboardMarkup([
+                    [InlineKeyboardButton("📡 Manage Monitors", callback_data="live_refresh")]
+                ])
+            )
+        except: pass
+
+    await open_channel_picker(
+        client, callback.message, user_id,
+        mode="live_dest",
+        on_confirm=on_live_dest_confirmed,
+        pre_selected=default_live,
+        is_edit=True,
+    )
+    await callback.answer()
 
 # ══════════════════════════════════════════════════
 # MONITOR TASK ENGINE (Queue-based)
@@ -760,6 +800,7 @@ async def process_live_message(userbot, bot, user_id, source_channel, dest_chann
             live_progress[prog_key]["forwarded"] = live_progress[prog_key].get("forwarded", 0) + 1
             live_progress[prog_key]["last_update"] = time.time()
             await increment_live_stats(user_id, source_channel)
+            await increment_channel_stat(user_id, dest_channel)
             logger.info(f"Live forwarded: {source_channel} → {dest_channel} [{user_id}]")
 
     except asyncio.CancelledError:

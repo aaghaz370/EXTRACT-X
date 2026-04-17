@@ -21,8 +21,9 @@ from database import init_db, update_settings, get_settings, is_user_banned, get
 # Plugins
 from plugins.auth import handle_auth_input
 from plugins.copy_manager import handle_batch_input
-from plugins.settings import show_settings_panel
+from plugins.settings import show_settings_panel, _nick_states
 from plugins.livebatch import handle_livebatch_input, init_live_monitors
+import plugins.channel_picker  # registers chpick_ callbacks
 
 # Configure Logging
 logging.basicConfig(
@@ -70,43 +71,63 @@ async def input_handler(client, message):
     # Check Batch Input
     if await handle_batch_input(client, message):
         return
-    
+
     # Check Live Batch Input
     if await handle_livebatch_input(client, message):
         return
-        
+
+    # Check Nickname Input (from settings channel manager)
+    user_id = message.from_user.id
+    if user_id in _nick_states and message.text:
+        nick_data = _nick_states.pop(user_id)
+        ch_id = nick_data["ch"]
+        new_nick = message.text.strip()
+        s = await get_settings(user_id) or {}
+        nicknames = s.get("channel_nicknames", {})
+        if new_nick == "-":
+            nicknames.pop(str(ch_id), None)
+            await update_settings(user_id, channel_nicknames=nicknames)
+            await message.reply_text(f"🗑 Nickname removed for `{ch_id}`.")
+        else:
+            nicknames[str(ch_id)] = new_nick
+            await update_settings(user_id, channel_nicknames=nicknames)
+            await message.reply_text(f"✅ Nickname set: **{new_nick}** for `{ch_id}`.")
+        return
+
     # Check Settings Add Channel Input
-    # We implement simple state here for "waiting_channel" if needed
-    # Or handled via a separate mechanism.
-    # For now, let's implement the Add Channel input logic here simply.
-    # Check Settings Input (Channel Add, Captions)
     if hasattr(client, "waiting_channel_user") and client.waiting_channel_user == message.from_user.id:
         new_channel = None
         if message.forward_from_chat:
             new_channel = str(message.forward_from_chat.id)
         elif message.text:
             new_channel = message.text.strip()
-        
+
         if not new_channel:
             await message.reply_text("⚠️ **Invalid Input**\nPlease send a valid Channel ID, Username, or forward a message from the channel.")
             return
-        
-        # Proper append logic
+
         s = await get_settings(message.from_user.id)
-        
         if not s:
             s = {"dest_channels": [], "filters": {"all": True}}
             await update_settings(message.from_user.id)
-            
+
         current = s.get("dest_channels", [])
-        
-        if new_channel not in current:
-            current.append(new_channel)
+        # Normalize incoming channel ID
+        ch_raw = new_channel.strip()
+        # Try to resolve actual chat ID
+        try:
+            chat_obj = await client.get_chat(ch_raw)
+            ch_resolved = chat_obj.id
+        except:
+            ch_resolved = ch_raw
+
+        if ch_resolved not in current and str(ch_resolved) not in [str(c) for c in current]:
+            current.append(ch_resolved)
             await update_settings(message.from_user.id, dest_channels=current)
-            await message.reply_text(f"✅ Channel `{new_channel}` added.\nTotal: {len(current)}")
+            await message.reply_text(f"✅ Channel `{ch_resolved}` added.\nTotal: {len(current)}")
         else:
-             await message.reply_text(f"⚠️ Channel `{new_channel}` already exists.")
-             
+            await message.reply_text(f"⚠️ Channel `{ch_resolved}` already exists.")
+
         del client.waiting_channel_user
         await show_settings_panel(message.from_user.id, message, is_edit=False)
         return

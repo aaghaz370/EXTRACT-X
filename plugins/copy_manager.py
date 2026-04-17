@@ -1,9 +1,9 @@
-from pyrogram import Client, filters, enums
-from pyrogram.types import Message
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait
-from database import get_session, get_settings, is_protected_channel, send_log_api, mirror_msg_api, upload_file_id_api
+from database import get_session, get_settings, is_protected_channel, send_log_api, mirror_msg_api, upload_file_id_api, increment_channel_stat
 from config import API_ID, API_HASH
 from plugins.subscription import check_user_access, record_task_use, check_force_sub
+from plugins.channel_picker import open_channel_picker
 import asyncio
 import logging
 import time
@@ -41,32 +41,66 @@ async def batch_start(client, message):
         return
 
     user_id = message.from_user.id
-    
-    # Session will be checked later if the URL is private.
-    
+
     # Check already running
     if user_id in active_jobs:
         await message.reply_text("⚠️ A task is already running.\nUse /cancel to stop it first.")
         return
-        
+
     # Check Subscription Access
     allowed, reason, file_limit, remaining = await check_user_access(user_id)
     if not allowed:
         await message.reply_text(reason)
         return
 
-    # Check Destination
+    # Check Destination channels exist
     settings = await get_settings(user_id)
     if not settings or not settings.get("dest_channels"):
-        await message.reply_text("⛔ No destination channels set!\nUse /settings > Channel Manager > Add Channel.")
+        await message.reply_text("⛔ No destination channels set!\nUse /settings → Channel Manager → Add Channel.")
         return
 
-    batch_states[user_id] = {"step": "LINK"}
-    await message.reply_text(
-        "🚀 **Batch Extraction Started**\n\n"
-        "Send the **Link** of the starting message from the private channel.\n"
+    # Check for remembered defaults
+    defaults = settings.get("default_batch_channels", [])
+    valid_defaults = [d for d in defaults if d in settings["dest_channels"]]
+
+    if valid_defaults:
+        # Offer quick-use defaults or show picker
+        # Build quick preview
+        from plugins.channel_picker import fetch_channel_title
+        nicknames = settings.get("channel_nicknames", {})
+        titles = []
+        for ch in valid_defaults:
+            titles.append(await fetch_channel_title(client, ch, nicknames))
+        preview = "\n".join(f"  • `{t}`" for t in titles)
+        await message.reply_text(
+            f"📦 **Batch Extract — Choose Destination**\n\n"
+            f"📌 **Remembered channels:**\n{preview}\n\n"
+            f"Use defaults or pick different channels?",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("⚡ Use Defaults", callback_data="batch_use_defaults")],
+                [InlineKeyboardButton("🔄 Pick Channels", callback_data="batch_pick_channels")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="batch_cancel")],
+            ])
+        )
+        batch_states[user_id] = {"step": "CHOOSE_DEST", "defaults": valid_defaults}
+    else:
+        # Directly open picker
+        await open_channel_picker(
+            client, message, user_id,
+            mode="batch",
+            on_confirm=on_batch_channels_confirmed,
+        )
+
+async def on_batch_channels_confirmed(client, callback, user_id, selected_channels, extra):
+    """Called when user confirms channel selection for batch."""
+    batch_states[user_id] = {"step": "LINK", "dest_channels": selected_channels}
+    await callback.message.reply_text(
+        "🚀 **Batch Extraction — Step 1**\n\n"
+        f"📤 **Destinations:** `{len(selected_channels)}` channel(s)\n\n"
+        "Now send the **starting message link** from the source channel:\n"
         "Example: `https://t.me/c/123456789/100`"
     )
+
 
 async def handle_batch_input(client, message):
     user_id = message.from_user.id
@@ -163,12 +197,53 @@ async def handle_batch_input(client, message):
             
         # Start Process
         link = state["link"]
-        del batch_states[user_id] # Clear State
-        
-        await start_copy_job(client, message, user_id, link, limit)
+        dest_channels = state.get("dest_channels")  # from picker
+        del batch_states[user_id]  # Clear State
+
+        await start_copy_job(client, message, user_id, link, limit, dest_channels=dest_channels)
         return True
-    
+
     return False
+
+# ── Batch destination picker callbacks ──────────────────────────
+@Client.on_callback_query(filters.regex("^batch_(use_defaults|pick_channels|cancel)$"))
+async def batch_dest_callback(client, callback):
+    user_id = callback.from_user.id
+    action = callback.data
+
+    if action == "batch_cancel":
+        batch_states.pop(user_id, None)
+        await callback.message.edit_text("❌ Batch cancelled.")
+        await callback.answer()
+        return
+
+    state = batch_states.get(user_id, {})
+
+    if action == "batch_use_defaults":
+        defaults = state.get("defaults", [])
+        if not defaults:
+            await callback.answer("No defaults saved!", show_alert=True)
+            return
+        batch_states[user_id] = {"step": "LINK", "dest_channels": defaults}
+        await callback.message.edit_text(
+            "🚀 **Batch Extraction — Step 1**\n\n"
+            f"📤 **Destinations:** `{len(defaults)}` channel(s) (defaults)\n\n"
+            "Send the **starting message link** from the source channel:\n"
+            "Example: `https://t.me/c/123456789/100`"
+        )
+        await callback.answer()
+
+    elif action == "batch_pick_channels":
+        batch_states.pop(user_id, None)
+        from plugins.channel_picker import open_channel_picker
+        await open_channel_picker(
+            client, callback.message, user_id,
+            mode="batch",
+            on_confirm=on_batch_channels_confirmed,
+            is_edit=True,
+        )
+        await callback.answer()
+
 
 def get_progress_bar(current, total, length=10):
     if total == 0: return "░" * length
@@ -177,18 +252,20 @@ def get_progress_bar(current, total, length=10):
     filled = max(0, min(length, filled))
     return "▓" * filled + "░" * (length - filled)
 
-async def start_copy_job(bot, message, user_id, link, limit):
+async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None):
     # initializing UI
     status_msg = await message.reply_text(
         "🔄 **System Initializing...**\n"
         "Please wait while I connect to the source."
     )
     active_jobs[user_id] = {"cancel": False, "status_msg": status_msg}
-    
+
     try:
         session = await get_session(user_id)
         settings = await get_settings(user_id)
-        dest_channels = settings["dest_channels"]
+        # Use picker-selected channels; fallback to all saved channels
+        if not dest_channels:
+            dest_channels = settings["dest_channels"]
         filters_set = settings["filters"]
         caption_rules = settings.get("caption_rules", {})
         
@@ -612,6 +689,9 @@ async def start_copy_job(bot, message, user_id, link, limit):
                                     await asyncio.sleep(10) # Cooling Period
                                 else:
                                     await asyncio.sleep(0.1) # Fast Burst
+
+                                # Increment channel stat in database
+                                await increment_channel_stat(user_id, dest)
 
                                 success = True
                                 break # Done for this destination

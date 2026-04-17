@@ -117,21 +117,39 @@ async def get_settings(user_id):
             "dest_channels": settings.get("dest_channels", []),
             "filters": settings.get("filters", {"all": True}),
             "caption_rules": settings.get("caption_rules", {}),
-            "custom_thumbnail": settings.get("custom_thumbnail", None)
+            "custom_thumbnail": settings.get("custom_thumbnail", None),
+            "default_batch_channels": settings.get("default_batch_channels", []),
+            "default_live_channels": settings.get("default_live_channels", []),
+            "channel_nicknames": settings.get("channel_nicknames", {}),
+            "channel_stats": settings.get("channel_stats", {}),
         }
     return None
 
 async def update_settings(user_id, **kwargs):
     database = await get_db()
-    
-    allowed_keys = ["dest_channels", "filters", "caption_rules", "custom_thumbnail"]
+
+    allowed_keys = [
+        "dest_channels", "filters", "caption_rules", "custom_thumbnail",
+        "default_batch_channels", "default_live_channels",
+        "channel_nicknames", "channel_stats",
+    ]
     update_data = {k: v for k, v in kwargs.items() if k in allowed_keys}
-    
+
     if not update_data: return
 
     await database.settings.update_one(
         {"_id": user_id},
         {"$set": update_data},
+        upsert=True
+    )
+
+async def increment_channel_stat(user_id, channel_id, count=1):
+    """Track how many files were sent to a channel."""
+    database = await get_db()
+    key = str(channel_id)
+    await database.settings.update_one(
+        {"_id": user_id},
+        {"$inc": {f"channel_stats.{key}": count}},
         upsert=True
     )
 

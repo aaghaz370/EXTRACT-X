@@ -274,29 +274,51 @@ async def caption_settings_handler(client, callback: CallbackQuery):
 async def channel_manager(client, callback: CallbackQuery):
     user_id = callback.from_user.id
     settings = await get_settings(user_id)
-    
+
     if not settings:
         settings = {"dest_channels": [], "filters": {"all": True}}
         await update_settings(user_id)
-        
-    channels = settings.get("dest_channels", [])
-    
-    text = "📡 **Destination Channels**\n\n"
+
+    channels        = settings.get("dest_channels", [])
+    nicknames       = settings.get("channel_nicknames", {})
+    stats           = settings.get("channel_stats", {})
+    def_batch       = settings.get("default_batch_channels", [])
+    def_live        = settings.get("default_live_channels", [])
+
+    text = (
+        "📡 **Channel Manager**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+
     if not channels:
-        text += "No channels added yet."
+        text += "📭 No channels added yet.\n"
     else:
         for i, ch in enumerate(channels, 1):
+            nick = nicknames.get(str(ch))
             try:
-                chat = await client.get_chat(ch)
-                title = chat.title or "Private Channel"
+                chat  = await client.get_chat(ch)
+                title = nick or chat.title or "Private Channel"
             except:
-                title = "Unknown Channel"
-            text += f"{i}. 📚 **{title}** (`{ch}`)\n"
-            
+                title = nick or f"Channel ({ch})"
+            sent  = stats.get(str(ch), 0)
+            b_def = " 📦" if ch in def_batch else ""
+            l_def = " 📡" if ch in def_live else ""
+            text += f"{i}. **{title}**{b_def}{l_def}\n   `{ch}` • Sent: `{sent}` files\n\n"
+
+    text += (
+        "📦 = Batch Default  •  📡 = Live Default\n"
+        "━━━━━━━━━━━━━━━━━━━━━━"
+    )
+
     kb = [
         [InlineKeyboardButton("➕ Add Channel", callback_data="add_channel")],
-        [InlineKeyboardButton("🗑 Delete Channel", callback_data="del_channel_menu")],
-        [InlineKeyboardButton("🔙 Back", callback_data="back_settings")]
+        [InlineKeyboardButton("🗑 Remove Channel", callback_data="del_channel_menu"),
+         InlineKeyboardButton("🏷 Nickname", callback_data="nick_menu")],
+        [InlineKeyboardButton("📦📌 Defaults for Batch", callback_data="setdef_batch"),
+         InlineKeyboardButton("📡📌 Defaults for Live", callback_data="setdef_live")],
+        [InlineKeyboardButton("📊 Channel Stats", callback_data="ch_stats"),
+         InlineKeyboardButton("🔄 Refresh", callback_data="set_channels")],
+        [InlineKeyboardButton("🔙 Back", callback_data="back_settings")],
     ]
     await edit_or_reply(callback.message, text, InlineKeyboardMarkup(kb))
 
@@ -401,6 +423,124 @@ async def channel_actions_handler(client, callback: CallbackQuery):
             if 0 <= idx < len(current):
                 removed = current.pop(idx)
                 await update_settings(user_id, dest_channels=current)
-                await callback.answer(f"🗑 Removed Channel ID: {removed}")
-        # Refresh the Channel Manager View
+                # Also clean removed channel from defaults
+                def_batch = [c for c in settings.get("default_batch_channels", []) if c != removed]
+                def_live  = [c for c in settings.get("default_live_channels",  []) if c != removed]
+                await update_settings(user_id, default_batch_channels=def_batch, default_live_channels=def_live)
+                await callback.answer(f"🗑 Removed: {removed}")
         await channel_manager(client, callback)
+
+# ── Defaults: Remember for Batch / Live ─────────────────────
+@Client.on_callback_query(filters.regex("^setdef_(batch|live)$"))
+async def set_defaults_handler(client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    mode    = callback.data  # setdef_batch or setdef_live
+
+    settings = await get_settings(user_id)
+    if not settings or not settings.get("dest_channels"):
+        await callback.answer("No channels configured!", show_alert=True)
+        return
+
+    picker_mode   = "def_batch" if mode == "setdef_batch" else "def_live"
+    existing_defs = settings.get(
+        "default_batch_channels" if mode == "setdef_batch" else "default_live_channels", []
+    )
+
+    from plugins.channel_picker import open_channel_picker
+
+    async def on_defaults_confirmed(cl, cb, uid, selected, extra):
+        key = "default_batch_channels" if extra["mode"] == "def_batch" else "default_live_channels"
+        await update_settings(uid, **{key: selected})
+        label = "📦 Batch" if extra["mode"] == "def_batch" else "📡 Live"
+        try:
+            await cb.message.edit_text(
+                f"✅ **{label} Defaults Saved!**\n\n"
+                f"`{len(selected)}` channel(s) will be pre-selected next time."
+            )
+        except: pass
+
+    await open_channel_picker(
+        client, callback.message, user_id,
+        mode=picker_mode,
+        on_confirm=on_defaults_confirmed,
+        pre_selected=existing_defs,
+        extra={"mode": picker_mode},
+        is_edit=True,
+    )
+    await callback.answer()
+
+# ── Channel Nicknames ───────────────────────────────
+_nick_states = {}  # user_id → {"ch": channel_id}
+
+@Client.on_callback_query(filters.regex("^(nick_menu|nick_set_|nick_del_|ch_stats)$"))
+async def nickname_handler(client, callback: CallbackQuery):
+    pass  # placeholder — routed below
+
+@Client.on_callback_query(filters.regex("^nick_"))
+async def nick_callback(client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    action  = callback.data
+    settings = await get_settings(user_id) or {}
+    channels  = settings.get("dest_channels", [])
+    nicknames = settings.get("channel_nicknames", {})
+
+    if action == "nick_menu":
+        if not channels:
+            await callback.answer("No channels!", show_alert=True)
+            return
+        text = "🏷 **Channel Nicknames**\n\nTap to set/change nickname:\n\n"
+        buttons = []
+        for i, ch in enumerate(channels):
+            nick = nicknames.get(str(ch), "")
+            try:
+                chat  = await client.get_chat(ch)
+                title = chat.title or str(ch)
+            except:
+                title = str(ch)
+            label = f"🏷 {title[:18]} — Nick: {nick[:12] if nick else 'not set'}"
+            buttons.append([InlineKeyboardButton(label, callback_data=f"nick_set_{i}")])
+        buttons.append([InlineKeyboardButton("⬅️ Back", callback_data="set_channels")])
+        await edit_or_reply(callback.message, text, InlineKeyboardMarkup(buttons))
+        await callback.answer()
+
+    elif action.startswith("nick_set_"):
+        idx = int(action[len("nick_set_"):])
+        if 0 <= idx < len(channels):
+            ch = channels[idx]
+            _nick_states[user_id] = {"ch": ch}
+            await callback.message.reply_text(
+                f"🏷 **Set Nickname**\n\nChannel: `{ch}`\n\nSend the nickname you want (or send `-` to remove):",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancel", callback_data="nick_menu")]])
+            )
+        await callback.answer()
+
+# ── Channel Stats ──────────────────────────────────
+@Client.on_callback_query(filters.regex("^ch_stats$"))
+async def channel_stats_view(client, callback: CallbackQuery):
+    user_id  = callback.from_user.id
+    settings = await get_settings(user_id) or {}
+    channels  = settings.get("dest_channels", [])
+    nicknames = settings.get("channel_nicknames", {})
+    stats     = settings.get("channel_stats", {})
+
+    text = "📊 **Channel Stats**\n\nHow many files were sent to each channel:\n\n"
+    if not channels:
+        text += "No channels configured."
+    else:
+        for ch in channels:
+            nick = nicknames.get(str(ch))
+            try:
+                chat  = await client.get_chat(ch)
+                title = nick or chat.title or str(ch)
+            except:
+                title = nick or str(ch)
+            count = stats.get(str(ch), 0)
+            bar   = "█" * min(count // 100, 10) + "░" * (10 - min(count // 100, 10))
+            text += f"📤 **{title[:22]}**\n   `{bar}` `{count}` files\n\n"
+
+    await edit_or_reply(
+        callback.message, text,
+        InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="set_channels")]])
+    )
+    await callback.answer()
+
