@@ -519,14 +519,6 @@ async def main():
     print("Starting Bot...")
     await bot.start()
     
-    # Warm up Pyrogram in-memory cache so it doesn't throw PeerIdInvalid on updates!
-    print("Warming up Cache for Peer IDs...")
-    try:
-        async for _ in bot.get_dialogs(limit=100): pass
-        print("Cache Warmed Up!")
-    except Exception as e:
-        print(f"Cache warmup error (Ignored): {e}")
-    
     # Set Bot Menu Commands
     await bot.set_bot_commands([
         BotCommand("start", "🏠 Home"),
@@ -536,7 +528,8 @@ async def main():
         BotCommand("batch", "🚀 Start Copying"),
         BotCommand("livebatch", "📡 Live Monitor"),
         BotCommand("cancel", "❌ Stop Job"),
-        BotCommand("showplan", "💎 My Plan"),
+        BotCommand("showplan", "💎 View & Upgrade Plan"),
+        BotCommand("myplan", "📊 My Plan Status"),
         BotCommand("checkcommand", "📂 All Commands"),
         BotCommand("about", "🤖 About Bot"),
         BotCommand("help", "ℹ️ Guide")
