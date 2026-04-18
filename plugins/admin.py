@@ -102,7 +102,10 @@ async def broadcast_command(client, message):
         for uid in users:
             try:
                 if isinstance(msg_to_send, Message):
-                    await msg_to_send.copy(chat_id=uid)
+                    await msg_to_send.copy(
+                        chat_id=uid,
+                        reply_markup=msg_to_send.reply_markup
+                    )
                 else:
                     await client.send_message(uid, msg_to_send)
                 success += 1

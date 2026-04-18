@@ -202,6 +202,17 @@ async def update_user_task(user_id, increment=1, new_reset_date=None):
         upsert=True
     )
 
+async def reset_daily_tasks(user_id, now_ts):
+    database = await get_db()
+    await database.subscriptions.update_one(
+        {"_id": user_id},
+        {"$set": {
+            "tasks_done": 0,
+            "last_reset_date": now_ts
+        }},
+        upsert=True
+    )
+
 async def check_db_connection():
     try:
         database = await get_db()

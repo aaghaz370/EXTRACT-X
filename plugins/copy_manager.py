@@ -78,7 +78,7 @@ async def batch_start(client, message):
         return
 
     # Check Subscription Access
-    allowed, reason, file_limit, remaining = await check_user_access(user_id)
+    allowed, reason, file_limit, remaining, dl_limit = await check_user_access(user_id)
     if not allowed:
         await message.reply_text(reason)
         return
@@ -183,7 +183,7 @@ async def handle_batch_input(client, message):
         state["step"] = "COUNT"
         
         # Check Limits Again to display hints
-        allowed, reason, file_limit, remaining = await check_user_access(user_id)
+        allowed, reason, file_limit, remaining, dl_limit = await check_user_access(user_id)
         limit_txt = f"{file_limit}" if file_limit != float('inf') else "Unlimited"
         
         await message.reply_text(
@@ -199,7 +199,7 @@ async def handle_batch_input(client, message):
         limit = None
         
         # Validate Limit vs Plan
-        allowed, reason, file_limit, remaining = await check_user_access(user_id)
+        allowed, reason, file_limit, remaining, dl_limit = await check_user_access(user_id)
         if not allowed:
             await message.reply_text(reason)
             del batch_states[user_id]
@@ -472,11 +472,15 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
         except: pass
         
         copied = 0
+        dl_copied = 0
         current_id = start_msg_id
         fail_count = 0
         consecutive_empty_batches = 0
         last_update_time = time.time()
         active_jobs[user_id]["paused"] = False
+        
+        # Get active limits securely
+        _, _, active_fwd_limit, _, active_dl_limit = await check_user_access(user_id)
         
         # Helper to calculate speed
         last_speed_calc = [time.time(), 0] # timestamp, bytes
@@ -681,6 +685,18 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
                                         except: pass
                                         
                                         # Fallback: Manual Extraction (Download & Upload)
+                                        if active_dl_limit != float('inf') and dl_copied >= active_dl_limit:
+                                            try:
+                                                await message.reply_text(
+                                                    f"⚠️ **Restricted Limit Reached!**\n\n"
+                                                    f"Your current plan restricts Manual Downloads/Uploads to `{active_dl_limit}` files per task.\n"
+                                                    f"Skipping this protected file.\n\n"
+                                                    "📲 _Upgrade your plan to bypass!_"
+                                                )
+                                            except: pass
+                                            success = True
+                                            break
+                                            
                                         sent_msg = None
                                         if msg.text:
                                             sent_msg = await userbot.send_message(d_id, final_caption or msg.text)
@@ -759,6 +775,7 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
                                                 if f_path and os.path.exists(f_path):
                                                     os.remove(f_path)
                                         
+                                        dl_copied += 1
                                         # Save the manually uploaded message to instantly forward it to other targets!
                                         if sent_msg:
                                             uploaded_restricted_msg = sent_msg

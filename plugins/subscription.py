@@ -1,7 +1,7 @@
 from pyrogram import Client, filters, enums
 from pyrogram.errors import UserNotParticipant
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from database import get_subscription, set_subscription, update_user_task, send_log_api, get_db
+from database import get_subscription, set_subscription, update_user_task, send_log_api, get_db, reset_daily_tasks
 from config import OWNER_ID, FORCE_CHANNEL_ID
 import time
 import datetime
@@ -18,8 +18,8 @@ PLANS = {
         "emoji": "🆓",
         "price": "FREE",
         "task_limit": 3,           # 3 tasks total (lifetime)
-        "forward_limit": 1000,     # Fast copy
-        "dl_limit": 100,           # Download+Upload (restricted)
+        "forward_limit": 100,      # Fast copy daily limit
+        "dl_limit": 3,             # Download+Upload daily limit
         "duration": 0,
         "live_monitor_limit": 0,
         "one_time": False,
@@ -142,7 +142,19 @@ async def get_resolved_plan(user_id):
 
     expiry = sub.get("expiry_date", 0)
     tasks_done = sub.get("tasks_done", 0)
+    last_reset = sub.get("last_reset_date", 0)
     now = time.time()
+
+    import datetime
+    
+    # Daily Free Plan Reset Logic (Midnight Reset)
+    if plan_key == "free":
+        now_dt = datetime.datetime.fromtimestamp(now)
+        last_reset_dt = datetime.datetime.fromtimestamp(last_reset) if last_reset else datetime.datetime.min
+        
+        if now_dt.date() > last_reset_dt.date():
+            tasks_done = 0
+            await reset_daily_tasks(user_id, now)
 
     # Auto-expire non-lifetime plans
     if plan_key not in ("free", "lifetime_2999") and expiry > 0 and now > expiry:
@@ -186,13 +198,14 @@ async def check_force_sub(client, message):
 # ACCESS CHECK ENGINE
 # ═══════════════════════════════════════════════════════════
 async def check_user_access(user_id):
-    """Returns: (is_allowed, reason_message, forward_limit, tasks_remaining)"""
+    """Returns: (is_allowed, reason_message, forward_limit, tasks_remaining, dl_limit)"""
     if user_id == int(OWNER_ID):
-        return True, "Owner Access", float('inf'), "Unlimited"
+        return True, "Owner Access", float('inf'), "Unlimited", float('inf')
 
     plan_key, plan, tasks, expiry = await get_resolved_plan(user_id)
     task_limit = plan["task_limit"]
     forward_limit = plan["forward_limit"]
+    dl_limit = plan["dl_limit"]
 
     if task_limit != float('inf') and tasks >= task_limit:
         return False, (
@@ -200,10 +213,10 @@ async def check_user_access(user_id):
             f"Your **{plan['name']}** allows `{fmt_tasks(task_limit)}` tasks.\n"
             f"You've used all of them! ❌\n\n"
             f"📲 Use /showplan to upgrade or activate your **Free Trial!**"
-        ), forward_limit, 0
+        ), forward_limit, 0, dl_limit
 
     remaining = (task_limit - tasks) if task_limit != float('inf') else "Unlimited"
-    return True, "Access Granted", forward_limit, remaining
+    return True, "Access Granted", forward_limit, remaining, dl_limit
 
 async def record_task_use(user_id):
     if user_id == int(OWNER_ID): return
@@ -549,11 +562,16 @@ async def add_premium(client, message):
         try:
             await client.send_message(
                 target_id,
-                f"🎉 **Premium Activated!**\n\n"
-                f"You've been upgraded to **{plan['name']}**!\n"
-                f"⏳ Valid until: `{exp_str}`\n\n"
-                f"Use /showplan to see your full limits.\n"
-                f"⚡ _Powered by Univora_"
+                f"🎉 **Premium Subscription Activated!**\n\n"
+                f"Congratulations! Your account has been upgraded to **{plan['name']}**.\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⏳ **Valid Until:** `{exp_str}`\n"
+                f"🔢 **Tasks Allowed:** `{fmt_tasks(plan['task_limit'])}`\n"
+                f"🔗 **Fast Copy Limit:** `{fmt_num(plan['forward_limit'])}`\n"
+                f"📦 **DL+Upload Limit:** `{fmt_num(plan['dl_limit'])}`\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🚀 Thank you for choosing ExtractX!\n"
+                f"Use /showplan anytime to check your active limits."
             )
         except: pass
     except Exception as e:
