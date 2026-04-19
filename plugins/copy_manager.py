@@ -385,7 +385,9 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
             real_last_msg_id = 0
             if is_public:
                 # Bots cannot use get_chat_history. Synthesize upper bound ceiling dynamically.
-                real_last_msg_id = start_msg_id + (int(limit) if limit != float('inf') else 100000)
+                # If limit is None ("all"), we can't synthesize easily, but we'll set a huge bound
+                bound_cap = int(limit) if limit is not None and limit != float('inf') else 1000000
+                real_last_msg_id = start_msg_id + bound_cap
             else:
                 async for last_msg in userbot.get_chat_history(real_chat_id, limit=1):
                     real_last_msg_id = last_msg.id
@@ -728,9 +730,23 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
                                             except ValueError as ve:
                                                 if "0 B" in str(ve):
                                                     logger.warning(f"0B Error on msg {msg.id}. Re-fetching message reference.")
+                                                    await asyncio.sleep(2)
                                                     fresh_msg = await userbot.get_messages(real_chat_id, msg.id)
                                                     if fresh_msg and fresh_msg.media:
-                                                        f_path = await userbot.download_media(fresh_msg, progress=get_progress_func("Downloading from Source"))
+                                                        try:
+                                                            f_path = await userbot.download_media(fresh_msg, progress=get_progress_func("Downloading from Source"))
+                                                        except ValueError as double_ve:
+                                                            if "0 B" in str(double_ve):
+                                                                active_jobs[user_id]["paused"] = True
+                                                                try:
+                                                                    await message.reply_text(
+                                                                        f"🛑 **Telegram API Limit Hit!**\n\n"
+                                                                        f"Telegram has temporarily blocked downloads (`auth.ExportAuthorization` FloodWait).\n\n"
+                                                                        f"⏸️ **Task Auto-Paused!**\n"
+                                                                        f"Do not cancel. Simply click **Resume** from the progress board after 45 mins to safely continue without losing this file!"
+                                                                    )
+                                                                except: pass
+                                                            raise double_ve
                                                 else:
                                                     raise ve
                                             
