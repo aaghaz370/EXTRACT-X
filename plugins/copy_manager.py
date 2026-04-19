@@ -711,14 +711,14 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
                                                     f_size = obj.file_size
                                                     break
                                             
-                                            if f_size and f_size > 2040000000: # Slightly under 2GB
+                                            if f_size and f_size > 4294967296: # Full 4GB limit
                                                 mb_sz = f_size / (1024 * 1024)
                                                 try:
                                                     await message.reply_text(
                                                         f"⚠️ **File Skipped** (Too Large)\n\n"
                                                         f"**ID:** `{msg.id}`\n"
                                                         f"**Size:** `{mb_sz:.2f} MB`\n"
-                                                        f"Telegram restricts manual uploads to 2GB. Skipping to protect extraction engine."
+                                                        f"Telegram hard-restricts manual uploads beyond 4GB. Skipping."
                                                     )
                                                 except: pass
                                                 success = True
@@ -746,7 +746,20 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
                                                                         f"Do not cancel. Simply click **Resume** from the progress board after 45 mins to safely continue without losing this file!"
                                                                     )
                                                                 except: pass
-                                                            raise double_ve
+                                                                
+                                                                # Infinite wait loop until unpaused
+                                                                while active_jobs[user_id].get("paused"):
+                                                                    await asyncio.sleep(3)
+                                                                    if active_jobs[user_id].get("cancel"): break
+                                                                
+                                                                if active_jobs[user_id].get("cancel"): raise Exception("Job Cancelled")
+                                                                
+                                                                # Post-pause inline rescue download (doesn't burn an attempt)
+                                                                fresh_msg = await userbot.get_messages(real_chat_id, msg.id)
+                                                                if fresh_msg and fresh_msg.media:
+                                                                    f_path = await userbot.download_media(fresh_msg, progress=get_progress_func("Downloading from Source"))
+                                                            else:
+                                                                raise double_ve
                                                 else:
                                                     raise ve
                                             
