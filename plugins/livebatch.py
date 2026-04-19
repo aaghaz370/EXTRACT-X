@@ -633,6 +633,13 @@ async def monitor_channel(client, user_id, source_channel, dest_channel, q: asyn
                 await asyncio.sleep(fw.value + 2)
                 # Re-queue the message to ensure it is not skipped!
                 await q.put(msg)
+            except ValueError as ve:
+                if str(ve) == "FLOOD_WAIT_0B":
+                    logger.warning(f"Core Media FloodWait [{user_id}]: Telegram forced a ~50 min block. Auto-pausing monitor.")
+                    await asyncio.sleep(3000)
+                    await q.put(msg)
+                else:
+                    logger.error(f"Live processing ValueError [{user_id}]: {ve}")
                 
             q.task_done()
 
@@ -754,9 +761,16 @@ async def process_live_message(userbot, bot, user_id, source_channel, dest_chann
                     except ValueError as ve:
                         if "0 B" in str(ve):
                             logger.warning(f"0B Error on live msg {msg.id}. Re-fetching.")
+                            await asyncio.sleep(2)
                             fresh_msg = await userbot.get_messages(source_channel, msg.id)
                             if fresh_msg and fresh_msg.media:
-                                f_path = await userbot.download_media(fresh_msg)
+                                try:
+                                    f_path = await userbot.download_media(fresh_msg)
+                                except ValueError as double_ve:
+                                    if "0 B" in str(double_ve):
+                                        logger.warning("Double 0B err! FloodWait blocking LiveBatch download stream.")
+                                        raise ValueError("FLOOD_WAIT_0B")
+                                    raise double_ve
                         else:
                             raise ve
                     if f_path:
@@ -824,6 +838,12 @@ async def process_live_message(userbot, bot, user_id, source_channel, dest_chann
         raise
     except FloodWait as fw:
         raise fw  # Bubble up to monitor_channel queue loop to sleep and retry
+    except ValueError as ve:
+        if str(ve) == "FLOOD_WAIT_0B":
+            raise ve  # Bubble up explicitly to monitor_channel
+        if prog_key in live_progress:
+            live_progress[prog_key]["errors"] = live_progress[prog_key].get("errors", 0) + 1
+        logger.error(f"process_live_message error [{user_id}/{source_channel}]: {ve}")
     except Exception as e:
         if prog_key in live_progress:
             live_progress[prog_key]["errors"] = live_progress[prog_key].get("errors", 0) + 1
