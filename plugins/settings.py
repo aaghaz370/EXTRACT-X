@@ -61,6 +61,9 @@ async def show_settings_panel(user_id, message_obj, is_edit=False):
              InlineKeyboardButton("🖼 Thumbnail Editor", callback_data="thumb_panel")
         ],
         [
+             InlineKeyboardButton("🧹 Text Cleaner", callback_data="clean_panel")
+        ],
+        [
              InlineKeyboardButton("--- Content Filters ---", callback_data="ignore")
         ],
         [
@@ -544,3 +547,77 @@ async def channel_stats_view(client, callback: CallbackQuery):
     )
     await callback.answer()
 
+
+
+# ══════════════════════════════════════════════════
+# TEXT CLEANER PANEL
+# ══════════════════════════════════════════════════
+
+def _clean_panel_text_and_kb(tc: dict) -> tuple:
+    """Build the text cleaner panel message and keyboard from settings dict."""
+    on  = "🟢 ON "
+    off = "🔴 OFF"
+
+    text = (
+        "🧹 **Text Cleaner Settings**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Automatically strip unwanted content from captions & text during extraction.\n\n"
+        f"**@Usernames Remover:** `{'ON  ✅' if tc.get('remove_usernames') else 'OFF ❌'}`\n"
+        f"  _Removes all @mention tags (e.g. @channel123)_\n\n"
+        f"**t.me Link Remover:** `{'ON  ✅' if tc.get('remove_tme_links') else 'OFF ❌'}`\n"
+        f"  _Removes Telegram share links (t.me/... links)_\n\n"
+        f"**Hashtag Remover:** `{'ON  ✅' if tc.get('remove_hashtags') else 'OFF ❌'}`\n"
+        f"  _Removes hashtags like #movie #hd #download_\n\n"
+        f"**Phone Number Remover:** `{'ON  ✅' if tc.get('remove_phones') else 'OFF ❌'}`\n"
+        f"  _Removes phone numbers like +91xxxxxxxx_\n\n"
+        f"**All URLs Remover:** `{'ON  ✅' if tc.get('remove_all_urls') else 'OFF ❌'}`\n"
+        f"  _Removes all http/https links from text_\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n"
+        "💡 _Toggle each rule independently. Applies to every extraction._"
+    )
+
+    def btn(label, key):
+        state = on if tc.get(key) else off
+        return InlineKeyboardButton(f"{state}| {label}", callback_data=f"tc_tog_{key}")
+
+    kb = [
+        [btn("Remove @Usernames",  "remove_usernames")],
+        [btn("Remove t.me Links",  "remove_tme_links")],
+        [btn("Remove #Hashtags",   "remove_hashtags")],
+        [btn("Remove 📞 Phones",   "remove_phones")],
+        [btn("Remove 🌐 All URLs", "remove_all_urls")],
+        [InlineKeyboardButton("🔙 Back to Main", callback_data="back_settings")],
+    ]
+    return text, InlineKeyboardMarkup(kb)
+
+
+@Client.on_callback_query(filters.regex("^clean_panel$"))
+async def text_cleaner_panel(client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    settings = await get_settings(user_id) or {}
+    tc = settings.get("text_clean", {})
+    text, markup = _clean_panel_text_and_kb(tc)
+    await edit_or_reply(callback.message, text, markup)
+    await callback.answer()
+
+
+@Client.on_callback_query(filters.regex("^tc_tog_"))
+async def text_cleaner_toggle(client, callback: CallbackQuery):
+    user_id = callback.from_user.id
+    key = callback.data[len("tc_tog_"):]
+
+    valid_keys = {"remove_usernames", "remove_tme_links", "remove_hashtags", "remove_phones", "remove_all_urls"}
+    if key not in valid_keys:
+        await callback.answer("Unknown option.", show_alert=True)
+        return
+
+    settings = await get_settings(user_id) or {}
+    tc = settings.get("text_clean") or {}
+    tc[key] = not tc.get(key, False)
+    await update_settings(user_id, text_clean=tc)
+
+    text, markup = _clean_panel_text_and_kb(tc)
+    await edit_or_reply(callback.message, text, markup)
+
+    state_label = "ON ✅" if tc[key] else "OFF ❌"
+    await callback.answer(f"{key.replace('_', ' ').title()}: {state_label}")

@@ -122,6 +122,13 @@ async def get_settings(user_id):
             "default_live_channels": settings.get("default_live_channels", []),
             "channel_nicknames": settings.get("channel_nicknames", {}),
             "channel_stats": settings.get("channel_stats", {}),
+            "text_clean": settings.get("text_clean", {
+                "remove_usernames": False,
+                "remove_tme_links": False,
+                "remove_hashtags": False,
+                "remove_phones": False,
+                "remove_all_urls": False,
+            }),
         }
     return None
 
@@ -131,7 +138,7 @@ async def update_settings(user_id, **kwargs):
     allowed_keys = [
         "dest_channels", "filters", "caption_rules", "custom_thumbnail",
         "default_batch_channels", "default_live_channels",
-        "channel_nicknames", "channel_stats",
+        "channel_nicknames", "channel_stats", "text_clean",
     ]
     update_data = {k: v for k, v in kwargs.items() if k in allowed_keys}
 

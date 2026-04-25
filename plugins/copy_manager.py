@@ -5,6 +5,7 @@ from database import get_session, get_settings, is_protected_channel, send_log_a
 from config import API_ID, API_HASH
 from plugins.subscription import check_user_access, record_task_use, check_force_sub
 from plugins.channel_picker import open_channel_picker
+from plugins.text_cleaner import apply_text_clean
 import asyncio
 import logging
 import time
@@ -298,6 +299,7 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
             dest_channels = settings["dest_channels"]
         filters_set = settings["filters"]
         caption_rules = settings.get("caption_rules", {})
+        text_clean    = settings.get("text_clean", {})
         
         # Parse Link First to Determine Worker Type
         try:
@@ -585,6 +587,10 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
                     if s: parts.append(s)
                     
                     final_caption = "\n".join(parts) if parts else None
+
+                    # Apply Text Cleaning rules (username/link/hashtag/phone/url removers)
+                    if final_caption and text_clean:
+                        final_caption = apply_text_clean(final_caption, text_clean) or None
 
                     # Copy Phase
                     # Copy Phase

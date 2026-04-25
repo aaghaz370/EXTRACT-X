@@ -15,6 +15,7 @@ from database import (
     increment_live_stats, update_live_monitor_meta, increment_channel_stat
 )
 from plugins.subscription import check_force_sub, get_resolved_plan, PLANS
+from plugins.text_cleaner import apply_text_clean
 from config import API_ID, API_HASH, OWNER_ID
 
 logger = logging.getLogger(__name__)
@@ -658,6 +659,7 @@ async def process_live_message(userbot, bot, user_id, source_channel, dest_chann
         settings = await get_settings(user_id) or {}
         filters_cfg = settings.get("filters", {"all": True})
         caption_rules = settings.get("caption_rules", {})
+        text_clean    = settings.get("text_clean", {})
         custom_thumb_id = settings.get("custom_thumbnail")
 
         monitors = await get_live_monitors(user_id)
@@ -698,6 +700,10 @@ async def process_live_message(userbot, bot, user_id, source_channel, dest_chann
         if p: cap = f"{p}\n{cap}" if cap else p
         if s: cap = f"{cap}\n{s}" if cap else s
         if caption_rules.get("remove_caption"): cap = ""
+
+        # Apply Text Cleaning rules (username/link/hashtag/phone/url removers)
+        if cap and text_clean:
+            cap = apply_text_clean(cap, text_clean)
 
         # ── Dest id ──
         try: d_id = int(dest_channel) if str(dest_channel).lstrip("-").isdigit() else dest_channel
