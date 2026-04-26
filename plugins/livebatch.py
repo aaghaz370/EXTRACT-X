@@ -702,8 +702,9 @@ async def process_live_message(userbot, bot, user_id, source_channel, dest_chann
         if caption_rules.get("remove_caption"): cap = ""
 
         # Apply Text Cleaning rules (username/link/hashtag/phone/url removers)
+        # caption_rules is passed so prefix/suffix/replacements are never cleaned
         if cap and text_clean:
-            cap = apply_text_clean(cap, text_clean)
+            cap = apply_text_clean(cap, text_clean, caption_rules)
 
         # ── Dest id ──
         try: d_id = int(dest_channel) if str(dest_channel).lstrip("-").isdigit() else dest_channel

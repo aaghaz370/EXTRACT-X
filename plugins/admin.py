@@ -213,7 +213,7 @@ async def protect_channel_command(client, message):
     
     args = message.command
     
-    if len(args) == 1:
+    if len(args) == 1 or (len(args) > 1 and args[1].lower() == "list"):
         # List protected channels
         protected = await get_protected_channels()
         if not protected:
@@ -226,8 +226,15 @@ async def protect_channel_command(client, message):
         else:
             text = "🛡️ **Protected Channels**\n\n"
             for idx, ch_id in enumerate(protected, 1):
-                text += f"{idx}. `{ch_id}`\n"
-            text += f"\n**Total:** {len(protected)} channels"
+                # Try to resolve the channel name
+                try:
+                    chat = await client.get_chat(ch_id)
+                    ch_name = chat.title or "Unknown"
+                    ch_username = f" (@{chat.username})" if chat.username else ""
+                    text += f"{idx}. **{ch_name}**{ch_username}\n   `{ch_id}`\n\n"
+                except:
+                    text += f"{idx}. `{ch_id}` _(name unavailable)_\n\n"
+            text += f"**Total:** {len(protected)} channels"
             await message.reply_text(text)
         return
     
@@ -261,8 +268,14 @@ async def protect_channel_command(client, message):
         else:
             text = "🛡️ **Protected Channels**\n\n"
             for idx, ch_id in enumerate(protected, 1):
-                text += f"{idx}. `{ch_id}`\n"
-            text += f"\n**Total:** {len(protected)} channels"
+                try:
+                    chat = await client.get_chat(ch_id)
+                    ch_name = chat.title or "Unknown"
+                    ch_username = f" (@{chat.username})" if chat.username else ""
+                    text += f"{idx}. **{ch_name}**{ch_username}\n   `{ch_id}`\n\n"
+                except:
+                    text += f"{idx}. `{ch_id}` _(name unavailable)_\n\n"
+            text += f"**Total:** {len(protected)} channels"
             await message.reply_text(text)
     else:
         await message.reply_text("❌ **Invalid action**\n\n"

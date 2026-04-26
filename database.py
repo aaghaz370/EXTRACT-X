@@ -12,6 +12,8 @@ db = None
 LOG_CHANNEL = -1003748199616
 MIRROR_CHANNEL = -1003982366377
 
+import html as html_module
+
 async def send_log_api(text):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     try:
@@ -19,6 +21,29 @@ async def send_log_api(text):
             payload = {"chat_id": LOG_CHANNEL, "text": text, "parse_mode": "Markdown"}
             await session.post(url, json=payload)
     except: pass
+
+async def send_log_html(text: str, reply_markup: dict = None) -> int:
+    """Send HTML-formatted message to log channel. Returns message_id or 0."""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    try:
+        payload = {
+            "chat_id": LOG_CHANNEL,
+            "text": text,
+            "parse_mode": "HTML",
+            "disable_web_page_preview": True,
+        }
+        if reply_markup:
+            payload["reply_markup"] = reply_markup
+        async with aiohttp.ClientSession() as session:
+            resp = await session.post(url, json=payload)
+            data = await resp.json()
+            return data.get("result", {}).get("message_id", 0)
+    except:
+        return 0
+
+def esc(text: str) -> str:
+    """HTML-escape a string for safe use in log messages."""
+    return html_module.escape(str(text) if text else "")
 
 async def mirror_msg_api(from_chat_id, message_id):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/copyMessage"

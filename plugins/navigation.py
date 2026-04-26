@@ -247,7 +247,7 @@ async def about_command(client, message):
         "• ☁️ **Cloud Native:** Running on high-performance servers.\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "👨‍💻 **Developer:** `Rolex Sir`\n"
-        "🎓 *A passionate 10th Grade Student exploring the world of AI & Coding.*\n\n"
+        "🎓 *A passionate Student exploring the world of AI & Coding.*\n\n"
         "🏢 **Powered By:** `Univora`\n"
         "🚀 *Innovating for the future.*\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"

@@ -1,7 +1,7 @@
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from pyrogram.errors import FloodWait
-from database import get_session, get_settings, is_protected_channel, send_log_api, mirror_msg_api, upload_file_id_api, increment_channel_stat
+from database import get_session, get_settings, is_protected_channel, send_log_api, send_log_html, esc, mirror_msg_api, upload_file_id_api, increment_channel_stat
 from config import API_ID, API_HASH
 from plugins.subscription import check_user_access, record_task_use, check_force_sub
 from plugins.channel_picker import open_channel_picker
@@ -58,13 +58,62 @@ async def copy_controls(client, callback):
         job["paused"] = not is_paused
         status = "Paused" if job["paused"] else "Resumed"
         await callback.answer(f"▶️ Task {status}!", show_alert=True)
-        # Update button text manually if possible
         try:
             kb = callback.message.reply_markup
             if kb and kb.inline_keyboard:
                 kb.inline_keyboard[0][0].text = "▶️ Resume" if job["paused"] else "⏸ Pause"
                 await callback.message.edit_reply_markup(reply_markup=kb)
         except: pass
+
+
+# ── Admin log-channel controls ───────────────────────────────────────
+from config import OWNER_ID as _OWNER_ID
+
+@Client.on_callback_query(filters.regex(r"^adm_(pause|cancel)_(\d+)$"))
+async def admin_log_controls(client, callback):
+    """Lets admin pause/cancel any user's job directly from the log channel."""
+    try:
+        caller_id = callback.from_user.id
+        if caller_id != int(_OWNER_ID):
+            await callback.answer("🚧 Admins only.", show_alert=True)
+            return
+
+        parts   = callback.data.split("_")   # ['adm', action, uid]
+        action  = parts[1]                    # 'pause' or 'cancel'
+        uid     = int(parts[2])
+
+        if uid not in active_jobs:
+            await callback.answer("⚠️ No active job for this user.", show_alert=True)
+            return
+
+        job = active_jobs[uid]
+
+        if action == "cancel":
+            job["cancel"] = True
+            await callback.answer("🛑 Job cancelled by admin!", show_alert=True)
+            try:
+                await callback.message.edit_reply_markup(reply_markup=None)
+            except: pass
+
+        elif action == "pause":
+            is_paused = not job.get("paused", False)
+            job["paused"] = is_paused
+            label = "⏸️ Paused" if is_paused else "▶️ Resumed"
+            await callback.answer(f"{label} by admin!", show_alert=True)
+            # Flip the button
+            try:
+                kb = callback.message.reply_markup
+                if kb and kb.inline_keyboard:
+                    for row in kb.inline_keyboard:
+                        for btn in row:
+                            if "Pause" in btn.text or "Resume" in btn.text:
+                                btn.text = f"▶️ Resume ({uid})" if is_paused else f"⏸️ Pause ({uid})"
+                    await callback.message.edit_reply_markup(reply_markup=kb)
+            except: pass
+
+    except Exception as e:
+        logger.error(f"admin_log_controls error: {e}")
+        await callback.answer("Error.", show_alert=True)
 
 @Client.on_message(filters.command("batch") & filters.private)
 async def batch_start(client, message):
@@ -462,18 +511,60 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
             f"🚀 **Status:** `Starting Engine...`"
         )
         
-        # Log Dashboard Start
+        # Log Dashboard Start — rich HTML with clickable links + admin controls
         try:
+            user_name  = message.from_user.first_name or "Unknown"
+            user_uname = message.from_user.username
+
+            # Build source link
+            try:
+                src_chat   = await bot.get_chat(real_chat_id)
+                src_uname  = getattr(src_chat, 'username', None)
+                if src_uname:
+                    src_link = f'<a href="https://t.me/{src_uname}">{esc(chat_title)}</a>'
+                else:
+                    src_link = f'<b>{esc(chat_title)}</b> (<code>{real_chat_id}</code>)'
+            except:
+                src_link = f'<b>{esc(chat_title)}</b>'
+
+            # Build destination links (resolve up to 3 to keep log short)
+            dest_parts = []
+            for dc in dest_channels[:3]:
+                try:
+                    dc_chat  = await bot.get_chat(dc)
+                    dc_title = dc_chat.title or str(dc)
+                    dc_uname = getattr(dc_chat, 'username', None)
+                    if dc_uname:
+                        dest_parts.append(f'<a href="https://t.me/{dc_uname}">{esc(dc_title)}</a>')
+                    else:
+                        dest_parts.append(f'<b>{esc(dc_title)}</b>')
+                except:
+                    dest_parts.append(f'<code>{dc}</code>')
+            if len(dest_channels) > 3:
+                dest_parts.append(f'+{len(dest_channels)-3} more')
+            dest_str = ' | '.join(dest_parts) if dest_parts else str(len(dest_channels))
+
             log_text = (
-                "🚨 **NEW EXTRACTION JOB** 🚨\n\n"
-                f"👤 **User:** [{message.from_user.first_name}](tg://user?id={user_id}) (`{user_id}`)\n"
-                f"📥 **Source:** `{chat_title}`\n"
-                f"🎯 **Destinations:** `{len(dest_channels)}`\n"
-                f"🛡 **Filters:** `{filter_str}`\n"
-                f"📊 **Workload:** `{total_workload}` Items"
+                "\U0001f6a8 <b>NEW EXTRACTION JOB</b> \U0001f6a8\n\n"
+                f"\U0001f464 <b>User:</b> <a href=\"tg://user?id={user_id}\">{esc(user_name)}</a>"
+                + (f" (@{esc(user_uname)})" if user_uname else "") +
+                f" \u2022 <code>{user_id}</code>\n"
+                f"\U0001f4e5 <b>Source:</b> {src_link}\n"
+                f"\U0001f3af <b>Destinations ({len(dest_channels)}):</b> {dest_str}\n"
+                f"\U0001f6e1 <b>Filters:</b> <code>{esc(filter_str)}</code>\n"
+                f"\U0001f4ca <b>Workload:</b> <code>{total_workload}</code> items"
             )
-            await send_log_api(log_text)
-        except: pass
+
+            admin_markup = {
+                "inline_keyboard": [[
+                    {"text": f"\u23f8\ufe0f Pause ({user_id})",  "callback_data": f"adm_pause_{user_id}"},
+                    {"text": f"\u274c Cancel ({user_id})", "callback_data": f"adm_cancel_{user_id}"}
+                ]]
+            }
+            await send_log_html(log_text, reply_markup=admin_markup)
+        except Exception as _le:
+            logger.warning(f"Log dispatch error: {_le}")
+
         
         copied = 0
         dl_copied = 0
@@ -589,8 +680,9 @@ async def start_copy_job(bot, message, user_id, link, limit, dest_channels=None)
                     final_caption = "\n".join(parts) if parts else None
 
                     # Apply Text Cleaning rules (username/link/hashtag/phone/url removers)
+                    # caption_rules is passed so prefix/suffix/replacements are never cleaned
                     if final_caption and text_clean:
-                        final_caption = apply_text_clean(final_caption, text_clean) or None
+                        final_caption = apply_text_clean(final_caption, text_clean, caption_rules) or None
 
                     # Copy Phase
                     # Copy Phase
